@@ -6,23 +6,20 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" integrity="sha512-vc58qvvBdrDR4etbxMdlTt4GBQk1qjvyORR2nrsPsFPyrs+/u5c3+1Ct6upOgdZoIl7eq6k3a1UPDSNAQi/32A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
-        .bar {
-            fill: steelblue;
-            margin: 2px;
-        }
-        .bar-label {
-            fill: black;
-            text-anchor: end;
-            font: 12px sans-serif;
-        }
         #chart {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            margin-left: 50px;
+            margin: 0px;
+            height: 60vh;
+            width: 100%; /* Responsive */
+            overflow: hidden;
         }
         svg {
-            overflow: visible;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .bar {
+            fill: gray;
+            margin: 2px;
         }
     </style>
 
@@ -32,7 +29,6 @@
     <h1 id="question"></h1>
     <div id="options"></div>
 
-    <button id="backButton">Back (Reanimate Graph)</button>
     <div id="chart"></div>
     <div id="results" style="display:none;">
         <h2>Results</h2>
@@ -153,120 +149,113 @@
 
 
 
+        // Function to get the dynamic width and height
+        function getChartDimensions() {
+            const chartDiv = document.getElementById('chart');
+            return {
+                width: chartDiv.clientWidth,
+                height: chartDiv.clientHeight
+            };
+        }
 
-
-
-        const margin = {top: 20, right: 30, bottom: 10, left: 50},
-                        width = 960 - margin.left - margin.right,
-                        height = 500 - margin.top - margin.bottom;
-
-        // Create SVG element only once
-        const svg = d3.select("#chart").append("svg")
-                    .attr("width", width + margin.left + margin.right)
-                    .attr("height", height + margin.top + margin.bottom)
-                    .append("g")
-                    .attr("transform", `translate(${margin.left},${margin.top})`);
-
-        let data = [];
-        let reanimateGraph = false;
+        
+        
+        // Create the SVG element with dynamic viewBox
+        const chartMargin = {top: 20, right: 30, bottom: 10, left: 30};
+        let svg = d3.select("#chart").append("svg");
+        let chartGroup = svg.append("g")
+                            .attr("transform", `translate(${chartMargin.left},${chartMargin.top})`);
 
         // Function to update the bar chart with new data
         function updateChart(values) {
-            // Update the data
-            data = values.map((value, index) => ({id: index, value: value}));
+            // constants
+            const transitionDuration = 750;
+            const textPadding = 5;
+            const labelYOffset = 4;
+
+            // Graphable area is graph width minus text width
+            const chartDimensions = getChartDimensions();
             
-            // Define the scales
+            // Find out the length of the longest text
+            let tempTextGroup = svg.append("g").attr("opacity", 0);
+            // append temporary text to measure
+            let tempTexts = tempTextGroup.selectAll(".temp-text")
+                .data(values)
+                .enter().append("text")
+                .attr("class", "temp-text")
+                .attr("x",0)
+                .text(d => d);
+            // measure text widths and find the maximum width
+            let maxTextWidth = d3.max(tempTexts.nodes(), node => node.getComputedTextLength());
+            tempTextGroup.remove();
+
+            // Graphable area for bars (excluding texts)
+            const width = chartDimensions.width - chartMargin.left - chartMargin.right - maxTextWidth;
+            const height = chartDimensions.height - chartMargin.top - chartMargin.bottom;
+
+            // Update viewBox to new dimensions for responsiveness
+            svg.attr("viewBox", `0 0 ${chartDimensions.width} ${chartDimensions.height}`);
+
+            let data = values.map((value, index) => ({ name: index, value }));
+
+            // Sort data according to value
+            data.sort((a, b) => d3.descending(a.value, b.value));
+
+            // Update the scales
             const x = d3.scaleLinear()
                         .domain([0, d3.max(data, d => d.value)])
                         .range([0, width]);
-
+            
             const y = d3.scaleBand()
-                        .domain(data.map(d => d.id))
+                        .domain(data.map(d => d.name))
                         .range([0, height])
                         .padding(0.1);
 
-            // Sort data
-            data.sort((a, b) => d3.descending(a.value, b.value));
-
-            // Update the y domain based on sorted data
-            y.domain(data.map(d => d.id));
-
             // Join the data to rects (bars)
-            const bars = svg.selectAll(".bar")
-                            .data(data, d => d.name);
+            const bars = chartGroup.selectAll(".bar")
+                                   .data(data, d => d.name);
 
-            if (reanimateGraph) {
-                // Directly set bars to zero width before transition if reanimating
-                bars.enter()
-                    .append("rect")
-                    .attr("class", "bar")
-                    .attr("x", 0)
-                    .attr("y", (d, i) => y(d.id))
-                    .attr("height", y.bandwidth())
-                    .merge(bars)
-                    .attr("width", 0) // Start animation from zero
-                    .transition().duration(750)
-                    .attr("y", (d, i) => y(d.id))
-                    .attr("width", d => x(d.value));
-            } else {
-                // Normal update without reanimation
-                bars.enter()
-                    .append("rect")
-                    .attr("class", "bar")
-                    .attr("x", 0)
-                    .attr("y", (d, i) => y(d.id))
-                    .attr("height", y.bandwidth())
-                    .merge(bars)
-                    .transition().duration(750)
-                    .attr("y", (d, i) => y(d.id))
-                    .attr("width", d => x(d.value));
-            }
+            bars.enter()
+                .append("rect")
+                .attr("class", "bar")
+                .attr("x", 0)
+                .attr("y", d => y(d.name))
+                .attr("height", y.bandwidth())
+                .merge(bars)
+                // animation for all change in state
+                .transition().duration(transitionDuration)
+                .attr("x", 0)
+                .attr("y", d => y(d.name))
+                .attr("width", d => x(d.value));
 
             bars.exit()
-                .transition().duration(750)
+                .transition().duration(transitionDuration)
                 .attr("width", 0)
                 .remove();
 
             // Join the data to text labels
-            const labels = svg.selectAll(".label")
-                            .data(data, d => d.value);
+            const labels = chartGroup.selectAll(".label")
+                                     .data(data, d => d.name);
 
-            if (reanimateGraph) {
-                // Directly position labels at start if reanimating
-                labels.enter()
-                    .append("text")
-                    .attr("class", "label")
-                    .attr("x", 0)
-                    .attr("y", (d, i) => y(d.id) + y.bandwidth() / 2 + 4)
-                    .text(d => d.value)
-                    .merge(labels)
-                    .transition().duration(750)
-                    .attr("y", (d, i) => y(d.id) + y.bandwidth() / 2 + 4)
-                    .attr("x", d => x(d.value) - 3);
-            } else {
-                // Normal label update without reanimation
-                labels.enter()
-                    .append("text")
-                    .attr("class", "label")
-                    .attr("x", d => x(d.value) - 3)
-                    .attr("y", (d, i) => y(d.id) + y.bandwidth() / 2 + 4)
-                    .text(d => d.value)
-                    .merge(labels)
-                    .transition().duration(750)
-                    .attr("y", (d, i) => y(d.id) + y.bandwidth() / 2 + 4)
-                    .attr("x", d => x(d.value) - 3);
-            }
-
+            labels.enter()
+                .append("text")
+                .attr("class", "label")
+                .attr("x", d => x(d.value) + 5)
+                .attr("y", d => y(d.name) + y.bandwidth() / 2 + labelYOffset)
+                .text(d => d.value)
+                .attr("text-anchor", "start")
+                .merge(labels)
+                // animation for all change in state
+                .transition().duration(750)
+                .attr("x", d => x(d.value) + 5)
+                .attr("y", d => y(d.name) + y.bandwidth() / 2 + labelYOffset)
+                .text(d => d.value);
+            
             labels.exit()
                 .transition().duration(750)
                 .attr("x", 0)
                 .remove();
-
-            // Reset reanimateGraph
-            reanimateGraph = false;
-            
         }
-
 
     </script>
 </body>
