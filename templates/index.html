@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Poll</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .bar {
+            fill: steelblue;
+            margin: 2px;
+        }
+        .bar-label {
+            fill: black;
+            text-anchor: end;
+            font: 12px sans-serif;
+        }
+        #chart {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+    </style>
+
+</head>
+<body>
+    <div id="status">Class is not running.</div>
+    <h1 id="question"></h1>
+    <div id="options"></div>
+    <div id="results" style="display:none;">
+        <h2>Results</h2>
+        <div id="resultText"></div>
+        <div id="chart"></div>
+    </div>
+    <div id="final_results" style="display:none;">
+        <h2>Final Results</h2>
+        <div id="finalResultText"></div>
+    </div>
+
+    <script>
+        const socket = io('http://127.0.0.1:5000');
+
+        let voted_state = false;
+        let voted_poll_token_state = ""; // TODO states break on refresh
+
+        socket.on('connect', function() {
+            console.log('Connected to the server via WebSocket!');
+        });
+
+        function vote(pollToken, optionIndex) {
+            voted_state = true;
+            voted_poll_token_state = pollToken;
+            socket.emit('vote', { poll_token: pollToken, option_index: optionIndex });
+            // expects 'update' event
+            console.log(`Voted ${optionIndex} with token ${pollToken}!`);
+        }
+
+        socket.on('disconnect', function() {
+            document.getElementById('status').textContent = "Class is not running."
+            UI_clear();
+            console.log('Disconnected');
+        });
+
+        socket.on('invalid', function() {
+            console.log('Invalid request');
+        });
+
+        function UI_clear() {
+            document.getElementById('question').textContent = '';
+            document.getElementById('options').innerHTML = '';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('final_results').style.display = 'none';
+        }
+        function UI_show_votes(data) {
+            UI_clear();
+            document.getElementById('resultText').innerHTML = data.anonymised_votes;
+            document.getElementById('results').style.display = 'block';
+            if (data.response_editable && data.state=='POLL_OPENS') {
+                document.getElementById('resultText').innerHTML += `<button onclick="voted_state=false;socket.emit('getstate');">Edit</button>`;
+            }
+            updateChart(data.anonymised_votes);
+        }
+
+        socket.on('update', function(data) {
+
+            console.log(data);
+
+            if (data.state == 'STARTING_SOON') {
+                document.getElementById('status').textContent = "Class is starting soon..."
+            } else {
+                document.getElementById('status').textContent = data.state
+            }
+
+            switch (data.state) {
+                case 'STARTING_SOON':
+                    // Show nothing
+                    UI_clear();
+                    break;
+                case 'POLL_OPENS':
+                    console.log(voted_poll_token_state)
+                    console.log(data.poll_token)
+                    console.log(voted_state)
+                    if (voted_poll_token_state !== data.poll_token) {
+                        voted_state = false;
+                    }
+                    if (voted_state) {
+                        // Show question/votes
+                        UI_show_votes(data);
+                    } else {
+                        // Show question/options
+                        document.getElementById('question').textContent = data.question;
+                        const options = data.options.map((option, index) => 
+                            `<button onclick="vote(${data.poll_token},${index})">${option}</button>`
+                        ).join('<br />');
+                        document.getElementById('options').innerHTML = options;
+                        document.getElementById('results').style.display = 'none';
+                        document.getElementById('final_results').style.display = 'none';
+                    }
+                    break;
+                case 'POLL_CLOSES':
+                    // Show question/votes
+                    UI_show_votes(data);
+                    break;
+                case 'POLL_ANSWER':
+                    // Show question/options+votes/answer
+                    document.getElementById('question').textContent = data.question;
+                    const finalResultText = data.results.map((votes, index) => 
+                        `<b>${data.options[index]}</b>: ${votes} vote(s) ${index === data.correct_answer ? '(Correct)' : ''}`
+                    ).join('<br>');
+                    document.getElementById('finalResultText').innerHTML = finalResultText;
+                    document.getElementById('final_results').style.display = 'block';
+                    document.getElementById('results').style.display = 'none';
+                    break;
+            }
+        });
+
+        // Function to update the bar chart with new data
+        function updateChart(values) {
+            // Generate data objects with indices as labels
+            const data = values.map((value, index) => ({
+                name: value,
+                value: value
+            }));
+
+            // Sort data by value in descending order
+            data.sort((a, b) => b.value - a.value);
+
+            // Define dimensions and margins
+            const margin = { top: 20, right: 10, bottom: 10, left: 50 };
+            const width = 600 - margin.left - margin.right;
+            const height = 300 - margin.top - margin.bottom;
+
+            // Select the chart area or append if it doesn't exist
+            const svg = d3.select('#chart').select('svg');
+            const g = svg.select('g');
+
+            if (svg.empty()) {
+                const svg = d3.select('#chart')
+                    .append('svg')
+                    .attr('width', width + margin.left + margin.right)
+                    .attr('height', height + margin.top + margin.bottom);
+
+                svg.append('g')
+                    .attr('transform', `translate(${margin.left},${margin.top})`);
+            }
+
+            // Set scales
+            const xScale = d3.scaleLinear()
+                .domain([0, Math.max(...data.map(d => d.value))])
+                .range([0, width]);
+
+            const yScale = d3.scaleBand()
+                .domain(data.map(d => d.name))
+                .range([0, height])
+                .padding(0.1);
+
+            // Bind data to bars and update/create/exit
+            const bars = g.selectAll('.bar')
+                .data(data, d => d.name);
+
+            bars.enter()
+                .append('rect')
+                .attr('class', 'bar')
+                .attr('x', 0)
+                .attr('y', d => yScale(d.name))
+                .attr('height', yScale.bandwidth())
+                .merge(bars)
+                .transition().duration(750)
+                .attr('width', d => xScale(d.value))
+                .attr('y', d => yScale(d.name));
+
+            bars.exit().remove();
+
+            // Bind data to labels and update/create/exit
+            const labels = g.selectAll('.label')
+                .data(data, d => d.name);
+
+            labels.enter()
+                .append('text')
+                .attr('class', 'label')
+                .attr('x', d => xScale(d.value) - 3)
+                .attr('y', d => yScale(d.name) + yScale.bandwidth() / 2 + 5)
+                .merge(labels)
+                .transition().duration(750)
+                .attr('x', d => xScale(d.value) - 3)
+                .attr('y', d => yScale(d.name) + yScale.bandwidth() / 2 + 5)
+                .text(d => d.name);
+
+            labels.exit().remove();
+        }
+
+
+    </script>
+</body>
+</html>
