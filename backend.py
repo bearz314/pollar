@@ -92,12 +92,11 @@ Home page for clients (static)
 '''
 @app.route('/')
 def home():
-    print("Home", session.get('client_id'))
     if 'client_id' not in session:
         session['client_id'] = str(uuid.uuid4())
-        print(f"Assigned new client_id: {session['client_id']}")
+        print(f"New visitor: {session['client_id']}")
     else:
-        print(f"Existing session with client_id: {session['client_id']}")
+        print(f"Returning visitor: {session['client_id']}")
 
     with lock:
         return render_template('index.html')
@@ -107,21 +106,17 @@ Client connects to websocket
 '''
 @socketio.on('connect')
 def handle_connect():
-    print("WS", session.get('client_id'))
+    # Expect to get session from HTML Flask session
     client_id = session.get('client_id')
     if client_id:
         print(f"WebSocket connected with client_id: {client_id}")
-        # emit('update', {'client_id': client_id, 'message': 'Connected successfully!'})
+        # Client context aware emit:
+        emit('myvote', clientvote_to_json()) # Votes placed by client (emit first)
+        emit('update', state_to_json())      # Overall state of poll  (emit last)
+        
     else:
-        print("WebSocket connection with unknown client.")
-        # emit('error', {'message': 'Session not initialized'})
-
-    # if 'client_id' not in session:
-    #     print("socket create session")
-    #     # session.permanent = False # Only expires when browser closes TODO not working, still can submit answer after refresh
-    #     session['client_id'] = str(uuid.uuid4())
-    #     # session.modified = True # Ensure this modification is saved
-    emit('update', state_to_json()) # Client context aware
+        print("WS fail to share session.")
+        emit('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'})
 
 '''
 Client requests for state
@@ -130,6 +125,13 @@ Client requests for state
 def handle_getstate():
     emit('update', state_to_json()) # Client context aware
 
+# '''
+# Client requests for their vote
+# '''
+# @socketio.on('getmyvote')
+# def handle_getmyvote():
+#     emit('myvote', clientvote_to_json()) # Client context aware
+
 '''
 Client votes for a poll option
 '''
@@ -137,30 +139,30 @@ Client votes for a poll option
 def handle_vote(data):
     # Check if poll is still open
     if not class_state == Class_State.POLL_OPENS:
-        emit('invalid') # Client context aware
+        emit('invalid', {'code':'POLL_NOT_OPEN'}) # Client context aware
         return
     
     # Check if poll token matches
     if not data['poll_token'] == poll_token_state:
-        emit('invalid') # Client context aware
+        emit('invalid', {'code':'POLL_TOKEN_MISMATCH'}) # Client context aware
         return
 
     # Check if response is valid
     if not 0 <= data['option_index'] < len(polls[poll_id_state].get('options',[])):
-        emit('invalid') # Client context aware
+        emit('invalid', {'code':'POLL_VOTE_OUTSIDE_RANGE'}) # Client context aware
         return
     
     # Check if client session exists
     client_id = session.get('client_id')
     if client_id is None:
-        emit('invalid') # Client context aware
+        emit('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'}) # Client context aware
         return
 
     # Check if client is editing response and editing is allowed
     client_existing_option_index = client_votes.get(poll_id_state,{}).get(client_id)
     response_editable = polls[poll_id_state].get('response_editable',False)
     if (client_existing_option_index is not None) and not response_editable:
-        emit('invalid') # Client context aware
+        emit('invalid', {'code':'POLL_ALREADY_VOTED'}) # Client context aware
         return
 
     # Process the vote
@@ -209,6 +211,22 @@ def state_to_json():
                 'anonymised_votes': anonymised_votes,
                 'anonymised_options': anonymised_options
             }
+
+'''
+Convert client vote to json to send back to the client
+'''
+def clientvote_to_json():
+    client_id = session.get('client_id')
+    if client_id is None:
+        emit('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'}) # Client context aware
+        return
+    
+    client_existing_option_index = client_votes.get(poll_id_state,{}).get(client_id, -1)
+    return {
+        'voted': False if client_existing_option_index==-1 else True,
+        'myvote': client_existing_option_index,
+        'voted_poll_token': poll_token_state
+    }
 
 
 '''

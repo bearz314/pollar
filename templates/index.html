@@ -4,7 +4,7 @@
     <title>Live Poll</title>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
 
-    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" integrity="sha512-vc58qvvBdrDR4etbxMdlTt4GBQk1qjvyORR2nrsPsFPyrs+/u5c3+1Ct6upOgdZoIl7eq6k3a1UPDSNAQi/32A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         .bar {
             fill: steelblue;
@@ -19,6 +19,10 @@
             display: flex;
             flex-direction: column;
             align-items: flex-start;
+            margin-left: 50px;
+        }
+        svg {
+            overflow: visible;
         }
     </style>
 
@@ -27,10 +31,13 @@
     <div id="status">Class is not running.</div>
     <h1 id="question"></h1>
     <div id="options"></div>
+
+    <button id="backButton">Back (Reanimate Graph)</button>
+    <div id="chart"></div>
     <div id="results" style="display:none;">
         <h2>Results</h2>
         <div id="resultText"></div>
-        <div id="chart"></div>
+        
     </div>
     <div id="final_results" style="display:none;">
         <h2>Final Results</h2>
@@ -41,23 +48,16 @@
         const socket = io('http://127.0.0.1:5000');
 
         let voted_state = false;
-        let voted_poll_token_state = ""; // TODO states break on refresh
+        let voted_poll_token_state = "";
 
         socket.on('connect', function() {
-            console.log('Connected to the server via WebSocket!');
+            // on connect, expected events 'myvote' followed by 'update'. The below will run only after.
+            console.log('Websocket now on standby');
         });
 
-        function vote(pollToken, optionIndex) {
-            voted_state = true;
-            voted_poll_token_state = pollToken;
-            socket.emit('vote', { poll_token: pollToken, option_index: optionIndex });
-            // expects 'update' event
-            console.log(`Voted ${optionIndex} with token ${pollToken}!`);
-        }
-
         socket.on('disconnect', function() {
-            document.getElementById('status').textContent = "Class is not running."
             UI_clear();
+            document.getElementById('status').textContent = "Class is not running.";
             console.log('Disconnected');
         });
 
@@ -65,30 +65,25 @@
             console.log('Invalid request');
         });
 
-        function UI_clear() {
-            document.getElementById('question').textContent = '';
-            document.getElementById('options').innerHTML = '';
-            document.getElementById('results').style.display = 'none';
-            document.getElementById('final_results').style.display = 'none';
-        }
-        function UI_show_votes(data) {
-            UI_clear();
-            document.getElementById('resultText').innerHTML = data.anonymised_votes;
-            document.getElementById('results').style.display = 'block';
-            if (data.response_editable && data.state=='POLL_OPENS') {
-                document.getElementById('resultText').innerHTML += `<button onclick="voted_state=false;socket.emit('getstate');">Edit</button>`;
+        socket.on('myvote', function(data) {
+            voted_state = data.voted;
+            voted_poll_token_state = data.voted_poll_token;
+            // data.myvote unused for now
+            if (voted_state) {
+                console.log(`myvote: Restored voted state for poll token ${voted_poll_token_state}`);
             }
-            updateChart(data.anonymised_votes);
-        }
+        });
 
         socket.on('update', function(data) {
 
+            console.log('Update:');
             console.log(data);
 
             if (data.state == 'STARTING_SOON') {
-                document.getElementById('status').textContent = "Class is starting soon..."
+                UI_clear();
+                document.getElementById('status').textContent = "Class is starting soon...";
             } else {
-                document.getElementById('status').textContent = data.state
+                document.getElementById('status').textContent = data.state;
             }
 
             switch (data.state) {
@@ -97,14 +92,12 @@
                     UI_clear();
                     break;
                 case 'POLL_OPENS':
-                    console.log(voted_poll_token_state)
-                    console.log(data.poll_token)
-                    console.log(voted_state)
                     if (voted_poll_token_state !== data.poll_token) {
                         voted_state = false;
                     }
                     if (voted_state) {
                         // Show question/votes
+                        console.log("Poll already voted.")
                         UI_show_votes(data);
                     } else {
                         // Show question/options
@@ -134,79 +127,144 @@
             }
         });
 
+        function vote(pollToken, optionIndex) {
+            voted_state = true;
+            voted_poll_token_state = pollToken;
+            socket.emit('vote', { poll_token: pollToken, option_index: optionIndex });
+            // expects 'update' event
+            console.log(`Voted ${optionIndex} with token ${pollToken}!`);
+        }
+
+        function UI_clear() {
+            document.getElementById('question').textContent = '';
+            document.getElementById('options').innerHTML = '';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('final_results').style.display = 'none';
+        }
+        function UI_show_votes(data) {
+            UI_clear();
+            document.getElementById('resultText').innerHTML = data.anonymised_votes;
+            document.getElementById('results').style.display = 'block';
+            if (data.response_editable && data.state=='POLL_OPENS') {
+                document.getElementById('resultText').innerHTML += `<button onclick="voted_state=false;socket.emit('getstate');">Edit</button>`;
+            }
+            updateChart(data.anonymised_votes);
+        }
+
+
+
+
+
+
+        const margin = {top: 20, right: 30, bottom: 10, left: 50},
+                        width = 960 - margin.left - margin.right,
+                        height = 500 - margin.top - margin.bottom;
+
+        // Create SVG element only once
+        const svg = d3.select("#chart").append("svg")
+                    .attr("width", width + margin.left + margin.right)
+                    .attr("height", height + margin.top + margin.bottom)
+                    .append("g")
+                    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+        let data = [];
+        let reanimateGraph = false;
+
         // Function to update the bar chart with new data
         function updateChart(values) {
-            // Generate data objects with indices as labels
-            const data = values.map((value, index) => ({
-                name: value,
-                value: value
-            }));
+            // Update the data
+            data = values.map((value, index) => ({id: index, value: value}));
+            
+            // Define the scales
+            const x = d3.scaleLinear()
+                        .domain([0, d3.max(data, d => d.value)])
+                        .range([0, width]);
 
-            // Sort data by value in descending order
-            data.sort((a, b) => b.value - a.value);
+            const y = d3.scaleBand()
+                        .domain(data.map(d => d.id))
+                        .range([0, height])
+                        .padding(0.1);
 
-            // Define dimensions and margins
-            const margin = { top: 20, right: 10, bottom: 10, left: 50 };
-            const width = 600 - margin.left - margin.right;
-            const height = 300 - margin.top - margin.bottom;
+            // Sort data
+            data.sort((a, b) => d3.descending(a.value, b.value));
 
-            // Select the chart area or append if it doesn't exist
-            const svg = d3.select('#chart').select('svg');
-            const g = svg.select('g');
+            // Update the y domain based on sorted data
+            y.domain(data.map(d => d.id));
 
-            if (svg.empty()) {
-                const svg = d3.select('#chart')
-                    .append('svg')
-                    .attr('width', width + margin.left + margin.right)
-                    .attr('height', height + margin.top + margin.bottom);
+            // Join the data to rects (bars)
+            const bars = svg.selectAll(".bar")
+                            .data(data, d => d.name);
 
-                svg.append('g')
-                    .attr('transform', `translate(${margin.left},${margin.top})`);
+            if (reanimateGraph) {
+                // Directly set bars to zero width before transition if reanimating
+                bars.enter()
+                    .append("rect")
+                    .attr("class", "bar")
+                    .attr("x", 0)
+                    .attr("y", (d, i) => y(d.id))
+                    .attr("height", y.bandwidth())
+                    .merge(bars)
+                    .attr("width", 0) // Start animation from zero
+                    .transition().duration(750)
+                    .attr("y", (d, i) => y(d.id))
+                    .attr("width", d => x(d.value));
+            } else {
+                // Normal update without reanimation
+                bars.enter()
+                    .append("rect")
+                    .attr("class", "bar")
+                    .attr("x", 0)
+                    .attr("y", (d, i) => y(d.id))
+                    .attr("height", y.bandwidth())
+                    .merge(bars)
+                    .transition().duration(750)
+                    .attr("y", (d, i) => y(d.id))
+                    .attr("width", d => x(d.value));
             }
 
-            // Set scales
-            const xScale = d3.scaleLinear()
-                .domain([0, Math.max(...data.map(d => d.value))])
-                .range([0, width]);
-
-            const yScale = d3.scaleBand()
-                .domain(data.map(d => d.name))
-                .range([0, height])
-                .padding(0.1);
-
-            // Bind data to bars and update/create/exit
-            const bars = g.selectAll('.bar')
-                .data(data, d => d.name);
-
-            bars.enter()
-                .append('rect')
-                .attr('class', 'bar')
-                .attr('x', 0)
-                .attr('y', d => yScale(d.name))
-                .attr('height', yScale.bandwidth())
-                .merge(bars)
+            bars.exit()
                 .transition().duration(750)
-                .attr('width', d => xScale(d.value))
-                .attr('y', d => yScale(d.name));
+                .attr("width", 0)
+                .remove();
 
-            bars.exit().remove();
+            // Join the data to text labels
+            const labels = svg.selectAll(".label")
+                            .data(data, d => d.value);
 
-            // Bind data to labels and update/create/exit
-            const labels = g.selectAll('.label')
-                .data(data, d => d.name);
+            if (reanimateGraph) {
+                // Directly position labels at start if reanimating
+                labels.enter()
+                    .append("text")
+                    .attr("class", "label")
+                    .attr("x", 0)
+                    .attr("y", (d, i) => y(d.id) + y.bandwidth() / 2 + 4)
+                    .text(d => d.value)
+                    .merge(labels)
+                    .transition().duration(750)
+                    .attr("y", (d, i) => y(d.id) + y.bandwidth() / 2 + 4)
+                    .attr("x", d => x(d.value) - 3);
+            } else {
+                // Normal label update without reanimation
+                labels.enter()
+                    .append("text")
+                    .attr("class", "label")
+                    .attr("x", d => x(d.value) - 3)
+                    .attr("y", (d, i) => y(d.id) + y.bandwidth() / 2 + 4)
+                    .text(d => d.value)
+                    .merge(labels)
+                    .transition().duration(750)
+                    .attr("y", (d, i) => y(d.id) + y.bandwidth() / 2 + 4)
+                    .attr("x", d => x(d.value) - 3);
+            }
 
-            labels.enter()
-                .append('text')
-                .attr('class', 'label')
-                .attr('x', d => xScale(d.value) - 3)
-                .attr('y', d => yScale(d.name) + yScale.bandwidth() / 2 + 5)
-                .merge(labels)
+            labels.exit()
                 .transition().duration(750)
-                .attr('x', d => xScale(d.value) - 3)
-                .attr('y', d => yScale(d.name) + yScale.bandwidth() / 2 + 5)
-                .text(d => d.name);
+                .attr("x", 0)
+                .remove();
 
-            labels.exit().remove();
+            // Reset reanimateGraph
+            reanimateGraph = false;
+            
         }
 
 
