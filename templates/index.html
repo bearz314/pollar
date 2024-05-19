@@ -1,22 +1,37 @@
-<!DOCTYPE html>
+<!doctype html>
+<html lang="en">
 <html>
-<head>
-    <title>Live Poll</title>
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" integrity="sha512-vc58qvvBdrDR4etbxMdlTt4GBQk1qjvyORR2nrsPsFPyrs+/u5c3+1Ct6upOgdZoIl7eq6k3a1UPDSNAQi/32A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pollar</title>
+    <!--Socket IO-->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"
+        integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO"
+        crossorigin="anonymous"></script>
+    <!--CSS Bootstrap-->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <!--D3 Graphing-->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"
+        integrity="sha512-vc58qvvBdrDR4etbxMdlTt4GBQk1qjvyORR2nrsPsFPyrs+/u5c3+1Ct6upOgdZoIl7eq6k3a1UPDSNAQi/32A=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         #chart {
             margin: 0px;
             height: 60vh;
-            width: 100%; /* Responsive */
+            /* responsive */
+            width: 100%;
             overflow: hidden;
         }
+
         svg {
             width: 100%;
             height: 100%;
             display: block;
         }
+
         .bar {
             fill: gray;
             margin: 2px;
@@ -24,21 +39,66 @@
     </style>
 
 </head>
-<body>
-    <div id="status">Class is not running.</div>
-    <h1 id="question"></h1>
-    <div id="options"></div>
 
-    <div id="chart"></div>
-    <div id="results" style="display:none;">
-        <h2>Results</h2>
-        <div id="resultText"></div>
-        
-    </div>
-    <div id="final_results" style="display:none;">
-        <h2>Final Results</h2>
-        <div id="finalResultText"></div>
-    </div>
+<body>
+    <header class="p-3 mb-3 border-bottom">
+        <div class="d-flex justify-content-center">
+            <div class="col-4 pt-1"></div>
+            <div class="col-4 text-center">
+                <a class="fs-4 text-body-emphasis text-decoration-none" href="#"><b>Pollar</b>Bear</a>
+            </div>
+            <div class="col-4 d-flex justify-content-end align-items-center">
+                <a class="btn btn-sm btn-outline-secondary" href="https://github.com/bearz314/pollar"
+                    target="_blank">GitHub</a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div id="hero" class="px-4 py-5 my-5 text-center">
+            <h1 id="hero-emoji" class="display-1 d-block mx-auto mb-4">👀</h1>
+            <h1 id="hero-title" class="display-5 fw-bold text-body-emphasis mb-4">JavaScript not enabled</h1>
+            <div class="col-lg-6 mx-auto">
+                <p id="hero-subtext" class="lead mb-4">Pollar will only function as intended with JavaScript.</p>
+            </div>
+        </div>
+
+        <div id="poll">
+            <h1 id="question" class="mx-5"></h1>
+            <div id="options"></div>
+
+            <form>
+                <div id="listGroup" class="list-group list-group-horizontal-xxl m-5">
+                    <!-- Radio buttons will be dynamically inserted here -->
+                    <!--<label class="list-group-item d-flex gap-3 p-3">
+                        <input class="form-check-input flex-shrink-0" type="radio" name="listGroupRadios"
+                            id="listGroupRadios1" value="" checked>
+                        <span>
+                            First radio
+                        </span>
+                    </label>-->
+                    <button type="button" onclick="vote();"
+                        class="list-group-item list-group-item-action active d-flex justify-content-center p-3">
+                        👍
+                        <span style="font-weight: bold;margin-left: 0.5rem;">Submit</span>
+                    </button>
+                </div>
+            </form>
+
+            <div id="chart"></div>
+            <div id="results" style="display:none;">
+                <h2>Results</h2>
+                <div id="resultText"></div>
+
+            </div>
+            <div id="final_results" style="display:none;">
+                <h2>Final Results</h2>
+                <div id="finalResultText"></div>
+            </div>
+        </div>
+    </main>
+
+
 
     <script>
         const socket = io('http://127.0.0.1:5000');
@@ -46,22 +106,42 @@
         let voted_state = false;
         let voted_poll_token_state = "";
 
-        socket.on('connect', function() {
+        function show_offline() {
+            document.getElementById('hero-emoji').innerText = '😌';
+            document.getElementById('hero-title').innerText = 'Class is not running';
+            document.getElementById('hero-subtext').innerText = "It's a great time to catch up on some snooze...";
+            document.getElementById('hero').style.display = 'block';
+            document.getElementById('poll').style.display = 'none';
+        }
+        function show_startingsoon() {
+            document.getElementById('hero-emoji').innerText = '🫨';
+            document.getElementById('hero-title').innerText = 'Class is starting soon';
+            document.getElementById('hero-subtext').innerText = 'Brace yourself, knowledge is coming!';
+            document.getElementById('hero').style.display = 'block';
+            document.getElementById('poll').style.display = 'none';
+        }
+        function show_poll() {
+            document.getElementById('hero').style.display = 'none';
+            document.getElementById('poll').style.display = 'block';
+        }
+
+        socket.on('connect', function () {
             // on connect, expected events 'myvote' followed by 'update'. The below will run only after.
             console.log('Websocket now on standby');
         });
 
-        socket.on('disconnect', function() {
+        socket.on('disconnect', function () {
             UI_clear();
-            document.getElementById('status').textContent = "Class is not running.";
+            show_offline();
             console.log('Disconnected');
         });
 
-        socket.on('invalid', function() {
-            console.log('Invalid request');
+        socket.on('invalid', function (data) {
+            console.log('Invalid request:');
+            console.log(data);
         });
 
-        socket.on('myvote', function(data) {
+        socket.on('myvote', function (data) {
             voted_state = data.voted;
             voted_poll_token_state = data.voted_poll_token;
             // data.myvote unused for now
@@ -70,24 +150,22 @@
             }
         });
 
-        socket.on('update', function(data) {
+        socket.on('update', function (data) {
 
             console.log('Update:');
             console.log(data);
 
-            if (data.state == 'STARTING_SOON') {
-                UI_clear();
-                document.getElementById('status').textContent = "Class is starting soon...";
-            } else {
-                document.getElementById('status').textContent = data.state;
-            }
-
             switch (data.state) {
+                case 'NOT_RUNNING':
+                    // Show nothing
+                    show_offline();
+                    break;
                 case 'STARTING_SOON':
                     // Show nothing
-                    UI_clear();
+                    show_startingsoon();
                     break;
                 case 'POLL_OPENS':
+                    show_poll();
                     if (voted_poll_token_state !== data.poll_token) {
                         voted_state = false;
                     }
@@ -98,22 +176,52 @@
                     } else {
                         // Show question/options
                         document.getElementById('question').textContent = data.question;
-                        const options = data.options.map((option, index) => 
-                            `<button onclick="vote(${data.poll_token},${index})">${option}</button>`
-                        ).join('<br />');
-                        document.getElementById('options').innerHTML = options;
+                        // options: generate radio buttons
+                        const listGroup = document.getElementById('listGroup');
+                        data.options.forEach((option, index) => {
+                            // Create the label that will contain the radio input and the text
+                            const label = document.createElement('label');
+                            label.className = 'list-group-item d-flex gap-3 p-3';
+
+                            // Create the radio input
+                            const input = document.createElement('input');
+                            input.className = 'form-check-input flex-shrink-0';
+                            input.type = 'radio';
+                            input.name = 'listGroupRadios';
+                            input.value = option;
+                            // Check the first radio button
+                            if (index === 0) {
+                                input.checked = true;
+                            }
+                            input.setAttribute('data-index', index);
+                            input.setAttribute('data-pollToken', data.poll_token);
+
+                            // Create the span that will contain the option text
+                            const span = document.createElement('span');
+                            span.textContent = option;
+
+                            // Append the radio input and the text span to the label
+                            label.appendChild(input);
+                            label.appendChild(span);
+
+                            // Insert the label before the submit button
+                            listGroup.insertBefore(label, listGroup.children[listGroup.children.length - 1]);
+                        });
+
                         document.getElementById('results').style.display = 'none';
                         document.getElementById('final_results').style.display = 'none';
                     }
                     break;
                 case 'POLL_CLOSES':
                     // Show question/votes
+                    show_poll();
                     UI_show_votes(data);
                     break;
                 case 'POLL_ANSWER':
                     // Show question/options+votes/answer
+                    show_poll();
                     document.getElementById('question').textContent = data.question;
-                    const finalResultText = data.results.map((votes, index) => 
+                    const finalResultText = data.results.map((votes, index) =>
                         `<b>${data.options[index]}</b>: ${votes} vote(s) ${index === data.correct_answer ? '(Correct)' : ''}`
                     ).join('<br>');
                     document.getElementById('finalResultText').innerHTML = finalResultText;
@@ -123,25 +231,43 @@
             }
         });
 
-        function vote(pollToken, optionIndex) {
-            voted_state = true;
-            voted_poll_token_state = pollToken;
-            socket.emit('vote', { poll_token: pollToken, option_index: optionIndex });
-            // expects 'update' event
-            console.log(`Voted ${optionIndex} with token ${pollToken}!`);
+        function vote() {
+            let radios = document.querySelectorAll('input[type="radio"][name="listGroupRadios"]');
+            for (const radio of radios) {
+                if (radio.checked) {
+                    let optionIndex = parseInt(radio.getAttribute('data-index'));
+                    let pollToken = parseInt(radio.getAttribute('data-pollToken'));
+
+                    voted_state = true;
+                    voted_poll_token_state = pollToken;
+                    socket.emit('vote', { poll_token: pollToken, option_index: optionIndex });
+                    // expects 'update' event
+                    console.log(`Voted ${optionIndex} with token ${pollToken}!`);
+                    return;
+                }
+            };
+            // should not end up here
+            console.log("Vote failed")
+
         }
 
         function UI_clear() {
             document.getElementById('question').textContent = '';
-            document.getElementById('options').innerHTML = '';
             document.getElementById('results').style.display = 'none';
             document.getElementById('final_results').style.display = 'none';
+            // options: remove older ones - backwards to reduce node removal complexities
+            let radios = document.querySelectorAll('input[type="radio"][name="listGroupRadios"]');
+            for (let i = radios.length - 1; i >= 0; i--) {
+                let radio = radios[i];
+                let elementToRemove = radio.closest('label') || radio;
+                elementToRemove.parentNode.removeChild(elementToRemove);
+            }
         }
         function UI_show_votes(data) {
             UI_clear();
             document.getElementById('resultText').innerHTML = data.anonymised_votes;
             document.getElementById('results').style.display = 'block';
-            if (data.response_editable && data.state=='POLL_OPENS') {
+            if (data.response_editable && data.state == 'POLL_OPENS') {
                 document.getElementById('resultText').innerHTML += `<button onclick="voted_state=false;socket.emit('getstate');">Edit</button>`;
             }
             updateChart(data.anonymised_votes);
@@ -158,13 +284,13 @@
             };
         }
 
-        
-        
+
+
         // Create the SVG element with dynamic viewBox
-        const chartMargin = {top: 20, right: 30, bottom: 10, left: 30};
+        const chartMargin = { top: 20, right: 30, bottom: 10, left: 30 };
         let svg = d3.select("#chart").append("svg");
         let chartGroup = svg.append("g")
-                            .attr("transform", `translate(${chartMargin.left},${chartMargin.top})`);
+            .attr("transform", `translate(${chartMargin.left},${chartMargin.top})`);
 
         // Function to update the bar chart with new data
         function updateChart(values) {
@@ -175,7 +301,7 @@
 
             // Graphable area is graph width minus text width
             const chartDimensions = getChartDimensions();
-            
+
             // Find out the length of the longest text
             let tempTextGroup = svg.append("g").attr("opacity", 0);
             // append temporary text to measure
@@ -183,7 +309,7 @@
                 .data(values)
                 .enter().append("text")
                 .attr("class", "temp-text")
-                .attr("x",0)
+                .attr("x", 0)
                 .text(d => d);
             // measure text widths and find the maximum width
             let maxTextWidth = d3.max(tempTexts.nodes(), node => node.getComputedTextLength());
@@ -203,17 +329,17 @@
 
             // Update the scales
             const x = d3.scaleLinear()
-                        .domain([0, d3.max(data, d => d.value)])
-                        .range([0, width]);
-            
+                .domain([0, d3.max(data, d => d.value)])
+                .range([0, width]);
+
             const y = d3.scaleBand()
-                        .domain(data.map(d => d.name))
-                        .range([0, height])
-                        .padding(0.1);
+                .domain(data.map(d => d.name))
+                .range([0, height])
+                .padding(0.1);
 
             // Join the data to rects (bars)
             const bars = chartGroup.selectAll(".bar")
-                                   .data(data, d => d.name);
+                .data(data, d => d.name);
 
             bars.enter()
                 .append("rect")
@@ -235,7 +361,7 @@
 
             // Join the data to text labels
             const labels = chartGroup.selectAll(".label")
-                                     .data(data, d => d.name);
+                .data(data, d => d.name);
 
             labels.enter()
                 .append("text")
@@ -250,7 +376,7 @@
                 .attr("x", d => x(d.value) + 5)
                 .attr("y", d => y(d.name) + y.bandwidth() / 2 + labelYOffset)
                 .text(d => d.value);
-            
+
             labels.exit()
                 .transition().duration(750)
                 .attr("x", 0)
@@ -258,5 +384,10 @@
         }
 
     </script>
+    <!--CSS Bootstrap-->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+        crossorigin="anonymous"></script>
 </body>
+
 </html>
