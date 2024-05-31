@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Poll</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <h1>Controls</h1>
+    <button onclick="create_poll()">Create Poll</button>
+    <h1 id="question">What is your favorite color?</h1>
+    <div id="options">
+        <button onclick="vote(0)">Red</button>
+        <button onclick="vote(1)">Blue</button>
+        <button onclick="vote(2)">Green</button>
+        <button onclick="vote(3)">Yellow</button>
+    </div>
+    <button onclick="showResults()">Show Results</button>
+    <div id="results"></div>
+
+    <script>
+        function vote(optionIndex) {
+            axios.post('http://127.0.0.1:5000/vote', {
+                poll_id: 'example_poll',
+                option_index: optionIndex
+            }).then(function (response) {
+                alert(response.data.message);
+            }).catch(function (error) {
+                console.error('Error:', error);
+            });
+        }
+
+        function create_poll(optionIndex) {
+            axios.post('http://127.0.0.1:5000/create_poll', {
+                poll_id: 'example_poll',
+                option_index: optionIndex
+            }).then(function (response) {
+                alert(response.data.message);
+            }).catch(function (error) {
+                console.error('Error:', error);
+            });
+        }
+
+        function showResults() {
+            axios.get('http://127.0.0.1:5000/results', {
+                params: {
+                    poll_id: 'example_poll'
+                }
+            }).then(function (response) {
+                if (response.data.success) {
+                    const results = response.data.results;
+                    const resultText = results.map((votes, index) =>
+                        `${polls['example_poll'].options[index]}: ${votes}`).join('<br>');
+                    document.getElementById('results').innerHTML = resultText;
+                } else {
+                    alert(response.data.message);
+                }
+            }).catch(function (error) {
+                console.error('Error:', error);
+            });
+        }
+
+        const polls = {
+            'example_poll': {
+                'question': 'What is your favorite color?',
+                'options': ['Red', 'Blue', 'Green', 'Yellow']
+            }
+        };
+    </script>
+</body>
+</html>

@@ -1,10 +1,11 @@
 from enum import Enum
 from flask import Flask, jsonify, session, render_template
 from flask_socketio import SocketIO, emit
-from flask_session import Session
+from flask_session import Session # enable server side session management
 from flask_cors import CORS
 
 import random
+import redis
 import threading
 import uuid
 
@@ -15,9 +16,13 @@ from polls import polls
 # Set up Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'aertf7896234987fsdhudsf&*TY@WEUIS!'
-app.config['SESSION_TYPE'] = 'filesystem'
 app.config['CORS_HEADERS'] = 'Content-Type'
 cors = CORS(app, resources={r"/*": {"origins": "*"}})
+# Configure Redis for storing the session data on the server-side
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_REDIS'] = redis.from_url('redis://127.0.0.1:6379')
 Session(app)
 socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False)
 
@@ -30,6 +35,47 @@ client_votes = {} # client_votes[poll_id][client_id]
 
 # Enable multi-threading
 lock = threading.Lock()
+
+'''
+Home page
+'''
+@app.route('/')
+def home():
+    return "Under construction"
+
+
+'''
+WebApp for clients (static)
+'''
+@app.route('/<room_id>', methods=['GET'])
+def serve_client_page(room_id):
+    if 'client_id' not in session:
+        session['client_id'] = str(uuid.uuid4())
+        print(f"New visitor: {session['client_id']}")
+    else:
+        print(f"Returning visitor: {session['client_id']}")
+
+    with lock:
+        return render_template('index.html', room_id=room_id)
+
+def register_session():
+    pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 '''
 Direct the server to start accepting poll responses
@@ -87,19 +133,7 @@ def poll_result(poll_id):
 
 #######################################################################################
 
-'''
-Home page for clients (static)
-'''
-@app.route('/')
-def home():
-    if 'client_id' not in session:
-        session['client_id'] = str(uuid.uuid4())
-        print(f"New visitor: {session['client_id']}")
-    else:
-        print(f"Returning visitor: {session['client_id']}")
 
-    with lock:
-        return render_template('index.html')
 
 '''
 Client connects to websocket
