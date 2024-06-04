@@ -1,4 +1,3 @@
-from enum import Enum
 from flask import Flask, jsonify, session, render_template
 from flask_socketio import SocketIO, join_room
 from flask_session import Session # enable server side session management
@@ -6,16 +5,14 @@ from flask_socketio import emit as emit_targeted # this is context sensitive emi
 from flask_cors import CORS
 from typing import Tuple
 
-import json
 import random
-import redis
-import threading
 import uuid
 
+from redis_interface import *
+from roomstate import RoomState
 
-# Configurations
-REDIS_HOSTNAME = '127.0.0.1'
-REDIS_PORT = 6379
+
+
 
 # Set up Flask app
 app = Flask(__name__)
@@ -26,15 +23,12 @@ cors = CORS(app, resources={r"/*": {"origins": "*"}})
 app.config['SESSION_TYPE'] = 'redis'
 app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_USE_SIGNER'] = True
-app.config['SESSION_REDIS'] = redis.Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, db=0)
+app.config['SESSION_REDIS'] = session_db()
 Session(app)
 socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False)
 
-# Redis for app data
-r = redis.Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, db=1, decode_responses=True)
 
-# Enum
-RoomState = Enum('RoomState', ['NOT_RUNNING','STARTING_SOON','POLL_OPENS','POLL_CLOSES','POLL_ANSWER'])
+
 
 
 
@@ -115,20 +109,20 @@ def handle_vote(data):
         return
     
     # Check if poll token matches
-    poll_token = int( r.get(f'room:{room}:current_poll:token') )
+    poll_token = get_current_poll_token(room=room)
     if not data['poll_token'] == poll_token:
         emit_targeted('invalid', {'code':'POLL_TOKEN_MISMATCH'})
         return
 
     # Check if response is valid
-    poll = json.loads( r.get(f'room:{room}:current_poll:content') )
+    poll = get_current_poll(room=room)
     chosen_option_index = data['option_index']
     if not 0 <= chosen_option_index < len(poll.get('options',[])):
         emit_targeted('invalid', {'code':'POLL_VOTE_OUTSIDE_RANGE'})
         return
     
     # Check if client is editing response and editing is allowed
-    poll_id = r.get(f'room:{room}:current_poll:id')
+    poll_id = get_current_poll_id(room=room)
     client_existing_option_index = session.get('votes',{}).get(poll_id)
     response_editable = poll.get('response_editable',False)
     if (client_existing_option_index is not None) and not response_editable:
@@ -138,9 +132,9 @@ def handle_vote(data):
     # Process the vote
     if client_existing_option_index is not None:
         # Reverse the previous vote
-        r.hincrby(f'room:{room}:votes:{poll_id}', client_existing_option_index, -1)
+        vote_increment(room=room, poll_id=poll_id, option_index=client_existing_option_index, value_incr=-1)
     # Add current vote
-    r.hincrby(f'room:{room}:votes:{poll_id}', chosen_option_index, 1)
+    vote_increment(room=room, poll_id=poll_id, option_index=chosen_option_index, value_incr=1)
     session.setdefault('votes',{})[poll_id] = chosen_option_index
 
     # Broadcast to all
@@ -160,51 +154,49 @@ def admin_reset_room(room):
         session['client_id'] = str(uuid.uuid4())
     session['room'] = room
     
-    r.set(f'room:{room}:state', RoomState.STARTING_SOON.value)
-    r.delete(f'room:{room}:current_poll:id')
-    r.delete(f'room:{room}:current_poll:token')
-    r.delete(f'room:{room}:current_poll:content')
-    # r.delete(f'room:{room}:votes:{poll_id}') # hset
+    delete_room_keys(room=room)
+    set_room_state(room=room, state=RoomState.STARTING_SOON)
     load_question_bank(room=room)
 
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
     return jsonify({'success': True, 'message': 'Room created'})
 
+'''
+Close room (data is retained)
+'''
+@app.route('/<room>/admin/close', methods=['GET'])
+def admin_close_room(room):
+    set_room_state(room=room, state=RoomState.NOT_RUNNING)
 
-def load_question_bank(room):
-    # Remove old question bank
-    r.delete(f'room:{room}:polls')
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
+    return jsonify({'success': True, 'message': 'Room closed'})
 
-    # Load question bank
-    from polls import polls
-    for poll_id, poll_content in polls.items():
-        # Serialise poll content
-        r.hset(f'room:{room}:polls', poll_id, json.dumps(poll_content))
+'''
+Delete room (data is deleted)
+'''
+@app.route('/<room>/admin/delete', methods=['GET'])
+def admin_delete_room(room):
+    delete_room_keys(room=room)
 
-        # Prepare memory for votes
-        options_len = len(poll_content.get('options'))
-        for i in range(options_len):
-            r.hset(f'room:{room}:votes:{poll_id}', i, 0)
-
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
+    return jsonify({'success': True, 'message': 'Room deleted'})
 
 '''
 Start accepting poll responses
 '''
 @app.route('/<room>/admin/open/<poll_id>', methods=['GET'])
 def poll_open(room, poll_id):
-    # Check that poll_id exists (question exists in question bank)
-    serialised_content = r.hget(f'room:{room}:polls', poll_id)
-    if serialised_content is None:
-        return jsonify({'success': False, 'message': 'poll_id not found'})
-    
-    # Load question from question bank
-    r.set(f'room:{room}:state', RoomState.POLL_OPENS.value)
-    r.set(f'room:{room}:current_poll:id', poll_id)
-    r.set(f'room:{room}:current_poll:token', random.randint(100000, 999999))
-    r.set(f'room:{room}:current_poll:content', serialised_content)
+    # Set current state
+    if not set_current_poll_state(room=room, poll_id=poll_id, poll_token=random.randint(100000, 999999)):
+        return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
+    if not set_room_state(room=room, state=RoomState.POLL_OPENS):
+        return jsonify({'success': False, 'message': 'Cannot set room state.'})
 
     # Broadcast to all
     socketio.emit('update', state_to_json(room=room), room=room)
-
     return jsonify({'success': True, 'message': 'Poll started'})
 
 
@@ -214,20 +206,14 @@ This state could be skipped, from POLL_OPENS to POLL_ANSWER
 '''
 @app.route('/<room>/admin/close/<poll_id>', methods=['GET'])
 def poll_close(room, poll_id):
-    # Check that poll_id exists (question exists in question bank)
-    serialised_content = r.hget(f'room:{room}:polls', poll_id)
-    if serialised_content is None:
-        return jsonify({'success': False, 'message': 'poll_id not found'})
-    
-    # Load question from question bank
-    r.set(f'room:{room}:state', RoomState.POLL_CLOSES.value)
-    r.set(f'room:{room}:current_poll:id', poll_id)
-    r.delete(f'room:{room}:current_poll:token')
-    r.set(f'room:{room}:current_poll:content', serialised_content)
+    # Set current state
+    if not set_current_poll_state(room=room, poll_id=poll_id, poll_token=random.randint(100000, 999999)):
+        return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
+    if not set_room_state(room=room, state=RoomState.POLL_CLOSES):
+        return jsonify({'success': False, 'message': 'Cannot set room state.'})
 
     # Broadcast to all
     socketio.emit('update', state_to_json(room=room), room=room)
-
     return jsonify({'success': True, 'message': 'Poll stopped'})
 
 
@@ -236,20 +222,14 @@ Stop accepting poll responses and reveal answer
 '''
 @app.route('/<room>/admin/reveal/<poll_id>', methods=['GET'])
 def poll_result(room, poll_id):
-    # Check that poll_id exists (question exists in question bank)
-    serialised_content = r.hget(f'room:{room}:polls', poll_id)
-    if serialised_content is None:
-        return jsonify({'success': False, 'message': 'poll_id not found'})
-    
-    # Load question from question bank
-    r.set(f'room:{room}:state', RoomState.POLL_ANSWER.value)
-    r.set(f'room:{room}:current_poll:id', poll_id)
-    r.delete(f'room:{room}:current_poll:token')
-    r.set(f'room:{room}:current_poll:content', serialised_content)
+    # Set current state
+    if not set_current_poll_state(room=room, poll_id=poll_id, poll_token=random.randint(100000, 999999)):
+        return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
+    if not set_room_state(room=room, state=RoomState.POLL_ANSWER):
+        return jsonify({'success': False, 'message': 'Cannot set room state.'})
 
     # Broadcast to all
     socketio.emit('update', state_to_json(room=room), room=room)
-
     return jsonify({'success': True, 'message': 'Answer revealed'})
 
 
@@ -258,11 +238,7 @@ def poll_result(room, poll_id):
 
 ############################################################################
 
-def get_room_state(room):
-    retrieved_room_state = r.get(f'room:{room}:state')
-    if retrieved_room_state is None:
-        return RoomState.NOT_RUNNING
-    return RoomState( int(retrieved_room_state) )
+
 
 '''
 Convert current poll state to json to be broadcasted to clients
@@ -276,12 +252,12 @@ def state_to_json(room) -> dict:
             return {'state': room_state.name}
         case RoomState.POLL_OPENS | RoomState.POLL_CLOSES:
             # Show question/options and question/votes
-            poll = json.loads( r.get(f'room:{room}:current_poll:content') )
-            poll_id = r.get(f'room:{room}:current_poll:id')
+            poll = get_current_poll(room=room)
+            # poll_id = get_current_poll_id(room=room)
             _,anonymised_votes = anonymise_optionsVotes(room=room)
             return {
                 'state': room_state.name,
-                'poll_token': int( r.get(f'room:{room}:current_poll:token') ),
+                'poll_token': get_current_poll_token(room=room),
                 'question': poll.get('question'),
                 'options': poll.get('options'),
                 'response_editable': poll.get('response_editable'),
@@ -289,8 +265,8 @@ def state_to_json(room) -> dict:
             }
         case RoomState.POLL_ANSWER:
             # Show question/options+votes/answer
-            poll = json.loads( r.get(f'room:{room}:current_poll:content') )
-            # poll_id = r.get(f'room:{room}:current_poll:id')
+            poll = get_current_poll(room=room)
+            # poll_id = get_current_poll_id(room=room)
             anonymised_options,anonymised_votes = anonymise_optionsVotes(room=room)
             return {
                 'state': room_state.name,
@@ -303,16 +279,19 @@ def state_to_json(room) -> dict:
 
 
 '''
-Anonymise the poll votes using a seed based on the poll_id
+Anonymise the poll votes using a seed based on the poll_id.
+Raises ValueError if for current poll, len(options) mismatches len(votes).
 '''
 def anonymise_optionsVotes(room) -> Tuple[list,list]:
     # Get current poll
-    poll_id = r.get(f'room:{room}:current_poll:id')
-    poll = json.loads( r.get(f'room:{room}:current_poll:content') )
+    poll_id = get_current_poll_id(room=room)
+    poll = get_current_poll(room=room)
 
     # Original lists to be shuffled
     options = poll.get('options')
-    votes = list( r.hgetall(f'room:{room}:votes:{poll_id}').values() )
+    votes = get_all_votes(room=room, poll_id=poll_id)
+    if len(options) is not len(votes):
+        raise ValueError("Options and votes size mismatch.")
 
     # Use a seed derived from the poll_id for predictable shuffling
     seed = hash(poll_id) & 0xffffffff
@@ -331,8 +310,8 @@ def anonymise_optionsVotes(room) -> Tuple[list,list]:
 Convert client vote to json to send back to the client
 '''
 def clientvote_to_json(room) -> dict:
-    poll_id = r.get(f'room:{room}:current_poll:id')
-    poll_token = int( r.get(f'room:{room}:current_poll:token') )
+    poll_id = get_current_poll_id(room=room)
+    poll_token = get_current_poll_token(room=room)
 
     # Exiting vote
     client_existing_option_index = session.get('votes',{}).get(poll_id,-1)
