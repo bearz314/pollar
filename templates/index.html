@@ -92,14 +92,14 @@
             </form>
 
             <div id="chart"></div>
-            <div id="results" style="display:none;">
+            <div id="results" class="m-5" style="display:none;">
                 <h2>Results</h2>
                 <div id="resultText"></div>
 
             </div>
-            <div id="final_results" style="display:none;">
-                <h2>Final Results</h2>
-                <div id="finalResultText"></div>
+            <div id="final_results" class="m-5" style="display:none;">
+                <h2>Answers</h2>
+                <div id="poll-container"></div>
             </div>
         </div>
     </main>
@@ -257,11 +257,31 @@
                 case 'POLL_ANSWER':
                     // Show question/options+votes/answer
                     show_poll();
+                    UI_show_votes(data);
                     document.getElementById('question').textContent = data.question;
-                    const finalResultText = data.results.map((votes, index) =>
-                        `<b>${data.options[index]}</b>: ${votes} vote(s) ${index === data.correct_answer ? '(Correct)' : ''}`
-                    ).join('<br>');
-                    document.getElementById('finalResultText').innerHTML = finalResultText;
+
+                    var pollContainer = document.getElementById('poll-container');
+                    pollContainer.innerHTML = '';
+
+                    // Iterate through the anonymised options index to create sorted list
+                    data.anonymised_options_idx.forEach(function(index, position) {
+                        // Create an element for the option
+                        var optionElement = document.createElement('div');
+
+                        // Add the option text
+                        optionElement.textContent = data.options[index];
+
+                        // Check if this is the correct answer
+                        if (index === data.correct_answer) {
+                            optionElement.textContent += " (correct)";
+                            optionElement.style.fontWeight = 'bold';  // Optionally style the correct answer
+                        }
+
+                        // Append the option element to the container
+                        pollContainer.appendChild(optionElement);
+                    });
+
+
                     document.getElementById('final_results').style.display = 'block';
                     document.getElementById('results').style.display = 'none';
                     break;

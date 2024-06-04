@@ -299,14 +299,14 @@ def state_to_json(room) -> dict:
             # Show question/options+votes/answer
             poll = get_current_poll(room=room)
             # poll_id = get_current_poll_id(room=room)
-            anonymised_options,anonymised_votes = anonymise_optionsVotes(room=room)
+            anonymised_options_idx,anonymised_votes = anonymise_optionsVotes(room=room)
             return {
                 'state': room_state.name,
                 'question': poll.get('question'),
                 'options': poll.get('options'),
                 'correct_answer': poll.get('correct_answer'),
                 'anonymised_votes': anonymised_votes,
-                'anonymised_options': anonymised_options
+                'anonymised_options_idx': anonymised_options_idx
             }
 
 
@@ -332,10 +332,10 @@ def anonymise_optionsVotes(room) -> Tuple[list,list]:
     random.shuffle(shuffle_idx)
     
     # Shuffle
-    shuffled_options = [options[i] for i in shuffle_idx]
+    shuffled_options_idx = shuffle_idx
     shuffled_votes = [votes[i] for i in shuffle_idx]
 
-    return shuffled_options, shuffled_votes
+    return shuffled_options_idx, shuffled_votes
 
 
 '''
