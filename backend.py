@@ -1,105 +1,61 @@
-from enum import Enum
 from flask import Flask, jsonify, session, render_template
-from flask_socketio import SocketIO, emit
-from flask_session import Session
+from flask_socketio import SocketIO, join_room
+from flask_session import Session # enable server side session management
+from flask_socketio import emit as emit_targeted # this is context sensitive emit
 from flask_cors import CORS
+from typing import Tuple
 
 import random
-import threading
 import uuid
 
+from redis_interface import *
+from roomstate import RoomState
 
-# In-memory question bank
-from polls import polls
+
+
 
 # Set up Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'aertf7896234987fsdhudsf&*TY@WEUIS!'
-app.config['SESSION_TYPE'] = 'filesystem'
 app.config['CORS_HEADERS'] = 'Content-Type'
 cors = CORS(app, resources={r"/*": {"origins": "*"}})
+# Configure Redis for storing the session data on the server-side
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_REDIS'] = session_db()
 Session(app)
 socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False)
 
-# Set up app state
-Class_State = Enum('Class_State', ['NOT_RUNNING','STARTING_SOON','POLL_OPENS','POLL_CLOSES','POLL_ANSWER'])
-class_state = Class_State.STARTING_SOON
-poll_id_state = None
-poll_token_state = None
-client_votes = {} # client_votes[poll_id][client_id]
 
-# Enable multi-threading
-lock = threading.Lock()
+
+
+
 
 '''
-Direct the server to start accepting poll responses
-'''
-@app.route('/control/poll_open/<poll_id>', methods=['GET'])
-def poll_start(poll_id):
-    with lock:
-        if not poll_id in polls:
-            return jsonify({'success': False, 'message': 'poll_id not found'})
-        
-        global class_state, poll_id_state, poll_token_state
-        class_state = Class_State.POLL_OPENS
-        poll_id_state = poll_id
-        poll_token_state = random.randint(100000, 999999)
-        
-        socketio.emit('update', state_to_json()) # broadcast to all
-        
-        return jsonify({'success': True, 'message': 'Poll started'})
-
-'''
-Direct the server to stop accepting poll responses, answer not revealed yet.
-This state could be skipped, from POLL_OPENS to POLL_ANSWER
-'''
-@app.route('/control/poll_close/<poll_id>', methods=['GET'])
-def poll_close(poll_id):
-    with lock:
-        if not poll_id in polls:
-            return jsonify({'success': False, 'message': 'poll_id not found'})
-        
-        global class_state, poll_id_state
-        class_state = Class_State.POLL_CLOSES
-        poll_id_state = poll_id
-
-        socketio.emit('update', state_to_json()) # broadcast to all
-
-        return jsonify({'success': True, 'message': 'Poll stopped'})
-
-'''
-Direct the server to stop accepting poll responses and reveal answer
-'''
-@app.route('/control/poll_answer/<poll_id>', methods=['GET'])
-def poll_result(poll_id):
-    with lock:
-        if not poll_id in polls:
-            return jsonify({'success': False, 'message': 'poll_id not found'})
-        
-        global class_state, poll_id_state
-        class_state = Class_State.POLL_ANSWER
-        poll_id_state = poll_id
-
-        socketio.emit('update', state_to_json()) # broadcast to all
-
-        return jsonify({'success': True, 'message': 'Answer revealed'})
-
-
-#######################################################################################
-
-'''
-Home page for clients (static)
+Home page
 '''
 @app.route('/')
 def home():
-    if 'client_id' not in session:
-        session['client_id'] = str(uuid.uuid4())
-        print(f"New visitor: {session['client_id']}")
-    else:
-        print(f"Returning visitor: {session['client_id']}")
+    return "Under construction"
 
-    with lock:
-        return render_template('index.html')
+
+'''
+WebApp for clients (static)
+'''
+@app.route('/<room>', methods=['GET'])
+def serve_client_page(room):
+    # Create client_id (shared with websocket)
+    if session.get('client_id') is None:
+        session['client_id'] = str(uuid.uuid4())
+        print(f"[{room}] New visitor: {session['client_id']}")
+    else:
+        print(f"[{room}] Returning visitor: {session['client_id']}")
+    # Set room (shared with websocket)
+    session['room'] = room
+
+    return render_template('index.html')
+
 
 '''
 Client connects to websocket
@@ -108,188 +64,265 @@ Client connects to websocket
 def handle_connect():
     # Expect to get session from HTML Flask session
     client_id = session.get('client_id')
-    if client_id:
-        print(f"WebSocket connected with client_id: {client_id}")
-        # Client context aware emit:
-        emit('myvote', clientvote_to_json()) # Votes placed by client (emit first)
-        emit('update', state_to_json())      # Overall state of poll  (emit last)
-        
-    else:
+    room = session.get('room')
+    if client_id is None or room is None:
         print("WS fail to share session.")
-        emit('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'})
+        emit_targeted('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'})
+        return
+
+    # Join room
+    join_room(room)
+    print(f"[{room}] WebSocket: client_id {client_id}")
+
+    # Client context aware emit
+    emit_targeted('myvote', clientvote_to_json(room=room))      # Votes placed by client (emit first)
+    emit_targeted('update', state_to_json(room=room))           # Overall state of poll  (emit last)
+        
 
 '''
 Client requests for state
 '''
 @socketio.on('getstate')
 def handle_getstate():
-    emit('update', state_to_json()) # Client context aware
-
-# '''
-# Client requests for their vote
-# '''
-# @socketio.on('getmyvote')
-# def handle_getmyvote():
-#     emit('myvote', clientvote_to_json()) # Client context aware
+    room = session.get('room')
+    if room is None:
+        print("WS fail to share session.")
+        emit_targeted('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'})
+        return
+    emit_targeted('update', state_to_json(room=room))
 
 '''
 Client votes for a poll option
 '''
 @socketio.on('vote')
 def handle_vote(data):
+    room = session.get('room')
+    if room is None:
+        print("WS fail to share session.")
+        emit_targeted('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'})
+        return
+    
     # Check if poll is still open
-    if not class_state == Class_State.POLL_OPENS:
-        emit('invalid', {'code':'POLL_NOT_OPEN'}) # Client context aware
+    room_state = get_room_state(room=room)
+    if not room_state == RoomState.POLL_OPENS:
+        emit_targeted('invalid', {'code':'POLL_NOT_OPEN'})
         return
     
     # Check if poll token matches
-    if not data['poll_token'] == poll_token_state:
-        emit('invalid', {'code':'POLL_TOKEN_MISMATCH'}) # Client context aware
+    poll_token = get_current_poll_token(room=room)
+    if not data['poll_token'] == poll_token:
+        emit_targeted('invalid', {'code':'POLL_TOKEN_MISMATCH'})
         return
 
     # Check if response is valid
-    if not 0 <= data['option_index'] < len(polls[poll_id_state].get('options',[])):
-        emit('invalid', {'code':'POLL_VOTE_OUTSIDE_RANGE'}) # Client context aware
+    poll = get_current_poll(room=room)
+    chosen_option_index = data['option_index']
+    if not 0 <= chosen_option_index < len(poll.get('options',[])):
+        emit_targeted('invalid', {'code':'POLL_VOTE_OUTSIDE_RANGE'})
         return
     
-    # Check if client session exists
-    client_id = session.get('client_id')
-    if client_id is None:
-        emit('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'}) # Client context aware
-        return
-
     # Check if client is editing response and editing is allowed
-    client_existing_option_index = client_votes.get(poll_id_state,{}).get(client_id)
-    response_editable = polls[poll_id_state].get('response_editable',False)
+    poll_id = get_current_poll_id(room=room)
+    client_existing_option_index = session.get('votes',{}).get(poll_id)
+    response_editable = poll.get('response_editable',False)
     if (client_existing_option_index is not None) and not response_editable:
-        emit('invalid', {'code':'POLL_ALREADY_VOTED'}) # Client context aware
+        emit_targeted('invalid', {'code':'POLL_ALREADY_VOTED'})
         return
 
     # Process the vote
-    with lock:
-        option_index = data['option_index']
-        if client_existing_option_index is not None:
-            # Reverse the previous vote
-            polls[poll_id_state]['votes'][client_existing_option_index] -= 1
+    if client_existing_option_index is not None:
+        # Reverse the previous vote
+        vote_increment(room=room, poll_id=poll_id, option_index=client_existing_option_index, value_incr=-1)
+    # Add current vote
+    vote_increment(room=room, poll_id=poll_id, option_index=chosen_option_index, value_incr=1)
+    session.setdefault('votes',{})[poll_id] = chosen_option_index
 
-        client_votes.setdefault(poll_id_state, {})[client_id] = option_index
-        polls[poll_id_state]['votes'][option_index] += 1
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
 
-        socketio.emit('update', state_to_json()) # broadcast to all
+
+
+
+#########################################################################
+
+'''
+Create new room or reset existing room
+'''
+@app.route('/<room>/admin/new', methods=['GET'])
+def admin_reset_room(room):
+    if 'client_id' not in session:
+        session['client_id'] = str(uuid.uuid4())
+    session['room'] = room
+    
+    delete_room_keys(room=room)
+    set_room_state(room=room, state=RoomState.STARTING_SOON)
+    load_question_bank(room=room)
+
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
+    return jsonify({'success': True, 'message': 'Room created'})
+
+'''
+Close room (data is retained)
+'''
+@app.route('/<room>/admin/close', methods=['GET'])
+def admin_close_room(room):
+    set_room_state(room=room, state=RoomState.NOT_RUNNING)
+
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
+    return jsonify({'success': True, 'message': 'Room closed'})
+
+'''
+Delete room (data is deleted)
+'''
+@app.route('/<room>/admin/delete', methods=['GET'])
+def admin_delete_room(room):
+    delete_room_keys(room=room)
+
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
+    return jsonify({'success': True, 'message': 'Room deleted'})
+
+'''
+Start accepting poll responses
+'''
+@app.route('/<room>/admin/open/<poll_id>', methods=['GET'])
+def poll_open(room, poll_id):
+    # Set current state
+    if not set_current_poll_state(room=room, poll_id=poll_id, poll_token=random.randint(100000, 999999)):
+        return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
+    if not set_room_state(room=room, state=RoomState.POLL_OPENS):
+        return jsonify({'success': False, 'message': 'Cannot set room state.'})
+
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
+    return jsonify({'success': True, 'message': 'Poll started'})
+
+
+'''
+Stop accepting poll responses, answer not revealed yet.
+This state could be skipped, from POLL_OPENS to POLL_ANSWER
+'''
+@app.route('/<room>/admin/close/<poll_id>', methods=['GET'])
+def poll_close(room, poll_id):
+    # Set current state
+    if not set_current_poll_state(room=room, poll_id=poll_id, poll_token=random.randint(100000, 999999)):
+        return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
+    if not set_room_state(room=room, state=RoomState.POLL_CLOSES):
+        return jsonify({'success': False, 'message': 'Cannot set room state.'})
+
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
+    return jsonify({'success': True, 'message': 'Poll stopped'})
+
+
+'''
+Stop accepting poll responses and reveal answer
+'''
+@app.route('/<room>/admin/reveal/<poll_id>', methods=['GET'])
+def poll_result(room, poll_id):
+    # Set current state
+    if not set_current_poll_state(room=room, poll_id=poll_id, poll_token=random.randint(100000, 999999)):
+        return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
+    if not set_room_state(room=room, state=RoomState.POLL_ANSWER):
+        return jsonify({'success': False, 'message': 'Cannot set room state.'})
+
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
+    return jsonify({'success': True, 'message': 'Answer revealed'})
+
+
+        
+
+
+############################################################################
+
+
 
 '''
 Convert current poll state to json to be broadcasted to clients
 '''
-def state_to_json():
-    match class_state:
-        case Class_State.STARTING_SOON:
+def state_to_json(room) -> dict:
+    room_state = get_room_state(room=room)
+    
+    match room_state:
+        case RoomState.NOT_RUNNING | RoomState.STARTING_SOON:
             # Nothing to show
-            return {
-                'state': class_state.name
-            }
-        case Class_State.POLL_OPENS | Class_State.POLL_CLOSES:
+            return {'state': room_state.name}
+        case RoomState.POLL_OPENS | RoomState.POLL_CLOSES:
             # Show question/options and question/votes
-            poll = polls[poll_id_state]
-            _,anonymised_votes = anonymise_optionsVotes(poll_id=poll_id_state)
+            poll = get_current_poll(room=room)
+            # poll_id = get_current_poll_id(room=room)
+            _,anonymised_votes = anonymise_optionsVotes(room=room)
             return {
-                'state': class_state.name,
-                'poll_token': poll_token_state,
-                'question': poll['question'],
-                'options': poll['options'],
-                'response_editable': poll['response_editable'],
+                'state': room_state.name,
+                'poll_token': get_current_poll_token(room=room),
+                'question': poll.get('question'),
+                'options': poll.get('options'),
+                'response_editable': poll.get('response_editable'),
                 'anonymised_votes': anonymised_votes
             }
-        case Class_State.POLL_ANSWER:
+        case RoomState.POLL_ANSWER:
             # Show question/options+votes/answer
-            poll = polls[poll_id_state]
-            anonymised_options,anonymised_votes = anonymise_optionsVotes(poll_id=poll_id_state)
+            poll = get_current_poll(room=room)
+            # poll_id = get_current_poll_id(room=room)
+            anonymised_options,anonymised_votes = anonymise_optionsVotes(room=room)
             return {
-                'state': class_state.name,
-                'question': poll['question'],
-                'options': poll['options'],
-                'correct_answer': poll['correct_answer'],
+                'state': room_state.name,
+                'question': poll.get('question'),
+                'options': poll.get('options'),
+                'correct_answer': poll.get('correct_answer'),
                 'anonymised_votes': anonymised_votes,
                 'anonymised_options': anonymised_options
             }
 
-'''
-Convert client vote to json to send back to the client
-'''
-def clientvote_to_json():
-    client_id = session.get('client_id')
-    if client_id is None:
-        emit('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'}) # Client context aware
-        return
-    
-    client_existing_option_index = client_votes.get(poll_id_state,{}).get(client_id, -1)
-    return {
-        'voted': False if client_existing_option_index==-1 else True,
-        'myvote': client_existing_option_index,
-        'voted_poll_token': poll_token_state
-    }
-
 
 '''
-Anonymise the poll votes using a seed based on the poll_id
+Anonymise the poll votes using a seed based on the poll_id.
+Raises ValueError if for current poll, len(options) mismatches len(votes).
 '''
-def anonymise_optionsVotes(poll_id) -> tuple:
-    if not poll_id in polls:
-        raise ValueError(f'poll_id bad: {poll_id}')
-    
-    poll = polls[poll_id]
-    options_votes = list(zip(poll['options'], poll['votes']))
-    
+def anonymise_optionsVotes(room) -> Tuple[list,list]:
+    # Get current poll
+    poll_id = get_current_poll_id(room=room)
+    poll = get_current_poll(room=room)
+
+    # Original lists to be shuffled
+    options = poll.get('options')
+    votes = get_all_votes(room=room, poll_id=poll_id)
+    if len(options) is not len(votes):
+        raise ValueError("Options and votes size mismatch.")
+
     # Use a seed derived from the poll_id for predictable shuffling
-    seed = hash(poll_id) & 0xffffffff #sum(ord(char) for char in poll_id)
+    seed = hash(poll_id) & 0xffffffff
     random.seed(seed)
-    random.shuffle(options_votes)
-
-    # Separate shuffled options and votes
-    shuffled_options = [option for option,_ in options_votes]
-    shuffled_votes = [votes for _,votes in options_votes]
+    shuffle_idx = list( range(len(votes)) )
+    random.shuffle(shuffle_idx)
     
+    # Shuffle
+    shuffled_options = [options[i] for i in shuffle_idx]
+    shuffled_votes = [votes[i] for i in shuffle_idx]
+
     return shuffled_options, shuffled_votes
 
 
+'''
+Convert client vote to json to send back to the client
+'''
+def clientvote_to_json(room) -> dict:
+    poll_id = get_current_poll_id(room=room)
+    poll_token = get_current_poll_token(room=room)
 
-# def emit_poll(poll_id, show_results=False, final_results=False, client_id=None):
-#     poll = polls[poll_id]
-#     results = poll['votes']
+    # Exiting vote
+    client_existing_option_index = session.get('votes',{}).get(poll_id,-1)
 
-#     if show_results:
-#         # Shuffle options to anonymize them before sending to clients
-#         shuffled_indices = list(range(len(poll['options'])))
-#         random.shuffle(shuffled_indices)
-#         shuffled_options = [poll['options'][i] for i in shuffled_indices]
-#         shuffled_results = [results[i] for i in shuffled_indices]
-#         response_data = {
-#             'state': 'showing_results',
-#             'question': poll['question'],
-#             'shuffled_options': shuffled_options,
-#             'shuffled_results': shuffled_results,
-#             'majority': majority,
-#             'client_vote': client_votes.get(client_id, {}).get('vote', None)
-#         }
-#     elif final_results:
-#         response_data = {
-#             'state': 'final_results',
-#             'question': poll['question'],
-#             'options': poll['options'],
-#             'results': results,
-#             'correct_answer': poll['correct_answer'],
-#             'client_vote': client_votes.get(client_id, {}).get('vote', None)
-#         }
-#     else:
-#         response_data = {
-#             'state': 'accepting_answers',
-#             'question': poll['question'],
-#             'options': poll['options']
-#         }
+    return {
+        'voted': False if client_existing_option_index==-1 else True,
+        'myvote': client_existing_option_index,
+        'voted_poll_token': poll_token
+    }
 
-#     if client_id:
-#         emit('update', response_data, room=client_id)
-#     else:
-#         socketio.emit('update', response_data, room=poll_id)
+
 
 if __name__ == '__main__':
     socketio.run(app, debug=True)
