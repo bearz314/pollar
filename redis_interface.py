@@ -8,12 +8,12 @@ REDIS_HOSTNAME = '127.0.0.1'
 REDIS_PORT = 6379
 
 
-# Redis for app data
-r = redis.Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, db=1, decode_responses=True)
-
 def session_db() -> redis.Redis:
     return redis.Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, db=0)
 
+
+# Redis for app data
+r = redis.Redis(host=REDIS_HOSTNAME, port=REDIS_PORT, db=1, decode_responses=True)
 
 # Keyspace layout
 # * 

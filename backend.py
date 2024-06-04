@@ -53,6 +53,7 @@ def serve_client_page(room):
         print(f"[{room}] Returning visitor: {session['client_id']}")
     # Set room (shared with websocket)
     session['room'] = room
+    session.modified = True  # Mutable datatype not automatically detected
 
     return render_template('index.html')
 
@@ -123,19 +124,23 @@ def handle_vote(data):
     
     # Check if client is editing response and editing is allowed
     poll_id = get_current_poll_id(room=room)
-    client_existing_option_index = session.get('votes',{}).get(poll_id)
-    response_editable = poll.get('response_editable',False)
-    if (client_existing_option_index is not None) and not response_editable:
-        emit_targeted('invalid', {'code':'POLL_ALREADY_VOTED'})
-        return
-
-    # Process the vote
-    if client_existing_option_index is not None:
-        # Reverse the previous vote
+    session.setdefault('votes',{}).setdefault(poll_id,{})
+    client_existing_poll_token = session['votes'][poll_id].get('token')
+    client_existing_option_index = session['votes'][poll_id].get('option')
+    if client_existing_poll_token == poll_token and client_existing_option_index is not None:
+        # Same poll was already voted by client
+        if not poll.get('response_editable',False):
+            # Response cannot be changed
+            emit_targeted('invalid', {'code':'POLL_ALREADY_VOTED'})
+            return
+        # Reverse previous vote
         vote_increment(room=room, poll_id=poll_id, option_index=client_existing_option_index, value_incr=-1)
+
     # Add current vote
     vote_increment(room=room, poll_id=poll_id, option_index=chosen_option_index, value_incr=1)
-    session.setdefault('votes',{})[poll_id] = chosen_option_index
+    session['votes'][poll_id]['option'] = chosen_option_index
+    session['votes'][poll_id]['token'] = poll_token
+    session.modified = True  # Mutable datatype not automatically detected
 
     # Broadcast to all
     socketio.emit('update', state_to_json(room=room), room=room)
@@ -153,6 +158,7 @@ def admin_reset_room(room):
     if 'client_id' not in session:
         session['client_id'] = str(uuid.uuid4())
     session['room'] = room
+    session.modified = True  # Mutable datatype not automatically detected
     
     delete_room_keys(room=room)
     set_room_state(room=room, state=RoomState.STARTING_SOON)
@@ -313,12 +319,18 @@ def clientvote_to_json(room) -> dict:
     poll_id = get_current_poll_id(room=room)
     poll_token = get_current_poll_token(room=room)
 
-    # Exiting vote
-    client_existing_option_index = session.get('votes',{}).get(poll_id,-1)
+    # Existing vote
+    session.setdefault('votes',{}).setdefault(poll_id,{})
+    client_existing_poll_token = session['votes'][poll_id].get('token')
+    client_existing_option_index = session['votes'][poll_id].get('option')
+    if client_existing_poll_token == poll_token and client_existing_option_index is not None:
+        myvote = client_existing_option_index
+    else:
+        myvote = -1
 
     return {
-        'voted': False if client_existing_option_index==-1 else True,
-        'myvote': client_existing_option_index,
+        'voted': myvote > -1,
+        'myvote': myvote,
         'voted_poll_token': poll_token
     }
 
