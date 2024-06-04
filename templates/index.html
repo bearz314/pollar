@@ -65,8 +65,6 @@
 
         <div id="poll">
             <h1 id="question" class="mx-5"></h1>
-            <div id="options"></div>
-
             <form>
                 <div id="listGroup" class="list-group list-group-horizontal-xxl m-5">
                     <!-- Radio buttons will be dynamically inserted here -->
@@ -77,12 +75,20 @@
                             First radio
                         </span>
                     </label>-->
-                    <button type="button" onclick="vote();"
-                        class="list-group-item list-group-item-action active d-flex justify-content-center p-3">
+                    <button id="submit_response" type="button" onclick="vote();"
+                        class="btn btn-primary btn-lg btn-block justify-content-center p-3">
                         👍
                         <span style="font-weight: bold;margin-left: 0.5rem;">Submit</span>
                     </button>
                 </div>
+                <div class="d-grid m-5">
+                    <button id="edit_response" type="button" onclick="voted_state=false;socket.emit('getstate');"
+                        class="btn btn-primary btn-lg btn-block justify-content-center p-3">
+                        🖊️
+                        <span style="font-weight: bold;margin-left: 0.5rem;">Edit</span>
+                    </button>
+                </div>
+                
             </form>
 
             <div id="chart"></div>
@@ -123,6 +129,37 @@
         function show_poll() {
             document.getElementById('hero').style.display = 'none';
             document.getElementById('poll').style.display = 'block';
+            document.getElementById('chart').style.display = 'none';
+            document.getElementById('submit_response').style.display = 'block';
+            document.getElementById('edit_response').style.display = 'none';
+            document.getElementById('chart').style.display = 'none';
+        }
+        function UI_clear() {
+            document.getElementById('question').textContent = '';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('final_results').style.display = 'none';
+            document.getElementById('submit_response').style.display = 'none';
+            document.getElementById('edit_response').style.display = 'none';
+            document.getElementById('chart').style.display = 'none';
+            // options: remove older ones - backwards to reduce node removal complexities
+            let radios = document.querySelectorAll('input[type="radio"][name="listGroupRadios"]');
+            for (let i = radios.length - 1; i >= 0; i--) {
+                let radio = radios[i];
+                let elementToRemove = radio.closest('label') || radio;
+                elementToRemove.parentNode.removeChild(elementToRemove);
+            }
+        }
+        function UI_show_votes(data) {
+            UI_clear();
+            document.getElementById('resultText').innerHTML = data.anonymised_votes;
+            document.getElementById('results').style.display = 'block';
+            document.getElementById('submit_response').style.display = 'none';
+            document.getElementById('edit_response').style.display = 'none';
+            document.getElementById('chart').style.display = 'block';
+            if (data.response_editable && data.state == 'POLL_OPENS') {
+                document.getElementById('edit_response').style.display = 'block';
+            }
+            updateChart(data.anonymised_votes);
         }
 
         socket.on('connect', function () {
@@ -207,7 +244,7 @@
                             // Insert the label before the submit button
                             listGroup.insertBefore(label, listGroup.children[listGroup.children.length - 1]);
                         });
-
+                        
                         document.getElementById('results').style.display = 'none';
                         document.getElementById('final_results').style.display = 'none';
                     }
@@ -251,27 +288,6 @@
 
         }
 
-        function UI_clear() {
-            document.getElementById('question').textContent = '';
-            document.getElementById('results').style.display = 'none';
-            document.getElementById('final_results').style.display = 'none';
-            // options: remove older ones - backwards to reduce node removal complexities
-            let radios = document.querySelectorAll('input[type="radio"][name="listGroupRadios"]');
-            for (let i = radios.length - 1; i >= 0; i--) {
-                let radio = radios[i];
-                let elementToRemove = radio.closest('label') || radio;
-                elementToRemove.parentNode.removeChild(elementToRemove);
-            }
-        }
-        function UI_show_votes(data) {
-            UI_clear();
-            document.getElementById('resultText').innerHTML = data.anonymised_votes;
-            document.getElementById('results').style.display = 'block';
-            if (data.response_editable && data.state == 'POLL_OPENS') {
-                document.getElementById('resultText').innerHTML += `<button onclick="voted_state=false;socket.emit('getstate');">Edit</button>`;
-            }
-            updateChart(data.anonymised_votes);
-        }
 
 
 
