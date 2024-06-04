@@ -45,16 +45,14 @@ WebApp for clients (static)
 '''
 @app.route('/<room>', methods=['GET'])
 def serve_client_page(room):
-    # Create client_id (shared with websocket)
-    if session.get('client_id') is None:
-        session['client_id'] = str(uuid.uuid4())
-        print(f"[{room}] New visitor: {session['client_id']}")
+    # Create session (shared with websocket)
+    if not session.get('room') == room:
+        session['room'] = room
+        session.modified = True  # Mutable datatype not automatically detected
+        print(f"[{room}] New visitor")
     else:
-        print(f"[{room}] Returning visitor: {session['client_id']}")
-    # Set room (shared with websocket)
-    session['room'] = room
-    session.modified = True  # Mutable datatype not automatically detected
-
+        print(f"[{room}] Returning visitor")
+    
     return render_template('index.html')
 
 
@@ -64,16 +62,15 @@ Client connects to websocket
 @socketio.on('connect')
 def handle_connect():
     # Expect to get session from HTML Flask session
-    client_id = session.get('client_id')
     room = session.get('room')
-    if client_id is None or room is None:
+    if room is None:
         print("WS fail to share session.")
         emit_targeted('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'})
         return
 
     # Join room
     join_room(room)
-    print(f"[{room}] WebSocket: client_id {client_id}")
+    print(f"[{room}] WebSocket")
 
     # Client context aware emit
     emit_targeted('myvote', clientvote_to_json(room=room))      # Votes placed by client (emit first)
@@ -85,6 +82,7 @@ Client requests for state
 '''
 @socketio.on('getstate')
 def handle_getstate():
+    # Expect to get session from HTML Flask session
     room = session.get('room')
     if room is None:
         print("WS fail to share session.")
@@ -98,6 +96,7 @@ Client votes for a poll option
 '''
 @socketio.on('vote')
 def handle_vote(data):
+    # Expect to get session from HTML Flask session
     room = session.get('room')
     if room is None:
         print("WS fail to share session.")
@@ -156,8 +155,7 @@ Create new room or reset existing room
 '''
 @app.route('/<room>/admin/new', methods=['GET'])
 def admin_reset_room(room):
-    if 'client_id' not in session:
-        session['client_id'] = str(uuid.uuid4())
+    #TODO Verify/create admin status
     session['room'] = room
     session.modified = True  # Mutable datatype not automatically detected
     
@@ -175,6 +173,7 @@ Close room (data is retained)
 '''
 @app.route('/<room>/admin/close', methods=['GET'])
 def admin_close_room(room):
+    #TODO Verify admin status
     set_room_state(room=room, state=RoomState.NOT_RUNNING)
 
     # Broadcast to all
@@ -187,6 +186,7 @@ Delete room (data is deleted)
 '''
 @app.route('/<room>/admin/delete', methods=['GET'])
 def admin_delete_room(room):
+    #TODO Verify admin status
     delete_room_keys(room=room)
 
     # Broadcast to all
@@ -199,6 +199,7 @@ Start accepting poll responses
 '''
 @app.route('/<room>/admin/open/<poll_id>', methods=['GET'])
 def poll_open(room, poll_id):
+    #TODO Verify admin status
     # Set current state
     if not set_current_poll_state(room=room, poll_id=poll_id):
         return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
@@ -215,6 +216,7 @@ Reset poll responses
 '''
 @app.route('/<room>/admin/reset/<poll_id>', methods=['GET'])
 def poll_reset(room, poll_id):
+    #TODO Verify admin status
     # Set current state
     if not set_current_poll_state(room=room, poll_id=poll_id):
         return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
@@ -234,6 +236,7 @@ This state could be skipped, from POLL_OPENS to POLL_ANSWER
 '''
 @app.route('/<room>/admin/close/<poll_id>', methods=['GET'])
 def poll_close(room, poll_id):
+    #TODO Verify admin status
     # Set current state
     if not set_current_poll_state(room=room, poll_id=poll_id):
         return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
@@ -250,6 +253,7 @@ Stop accepting poll responses and reveal answer
 '''
 @app.route('/<room>/admin/reveal/<poll_id>', methods=['GET'])
 def poll_result(room, poll_id):
+    #TODO Verify admin status
     # Set current state
     if not set_current_poll_state(room=room, poll_id=poll_id):
         return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
