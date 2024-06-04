@@ -78,7 +78,7 @@ def handle_connect():
     # Client context aware emit
     emit_targeted('myvote', clientvote_to_json(room=room))      # Votes placed by client (emit first)
     emit_targeted('update', state_to_json(room=room))           # Overall state of poll  (emit last)
-        
+
 
 '''
 Client requests for state
@@ -91,6 +91,7 @@ def handle_getstate():
         emit_targeted('invalid', {'code':'WS_FAIL_TO_SHARE_SESSION'})
         return
     emit_targeted('update', state_to_json(room=room))
+
 
 '''
 Client votes for a poll option
@@ -168,6 +169,7 @@ def admin_reset_room(room):
     socketio.emit('update', state_to_json(room=room), room=room)
     return jsonify({'success': True, 'message': 'Room created'})
 
+
 '''
 Close room (data is retained)
 '''
@@ -178,6 +180,7 @@ def admin_close_room(room):
     # Broadcast to all
     socketio.emit('update', state_to_json(room=room), room=room)
     return jsonify({'success': True, 'message': 'Room closed'})
+
 
 '''
 Delete room (data is deleted)
@@ -190,13 +193,14 @@ def admin_delete_room(room):
     socketio.emit('update', state_to_json(room=room), room=room)
     return jsonify({'success': True, 'message': 'Room deleted'})
 
+
 '''
 Start accepting poll responses
 '''
 @app.route('/<room>/admin/open/<poll_id>', methods=['GET'])
 def poll_open(room, poll_id):
     # Set current state
-    if not set_current_poll_state(room=room, poll_id=poll_id, poll_token=random.randint(100000, 999999)):
+    if not set_current_poll_state(room=room, poll_id=poll_id):
         return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
     if not set_room_state(room=room, state=RoomState.POLL_OPENS):
         return jsonify({'success': False, 'message': 'Cannot set room state.'})
@@ -207,13 +211,31 @@ def poll_open(room, poll_id):
 
 
 '''
+Reset poll responses
+'''
+@app.route('/<room>/admin/reset/<poll_id>', methods=['GET'])
+def poll_reset(room, poll_id):
+    # Set current state
+    if not set_current_poll_state(room=room, poll_id=poll_id):
+        return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
+    if not set_room_state(room=room, state=RoomState.POLL_OPENS):
+        return jsonify({'success': False, 'message': 'Cannot set room state.'})
+
+    reset_poll(room=room, poll_id=poll_id)
+
+    # Broadcast to all
+    socketio.emit('update', state_to_json(room=room), room=room)
+    return jsonify({'success': True, 'message': 'Poll reset'})
+
+
+'''
 Stop accepting poll responses, answer not revealed yet.
 This state could be skipped, from POLL_OPENS to POLL_ANSWER
 '''
 @app.route('/<room>/admin/close/<poll_id>', methods=['GET'])
 def poll_close(room, poll_id):
     # Set current state
-    if not set_current_poll_state(room=room, poll_id=poll_id, poll_token=random.randint(100000, 999999)):
+    if not set_current_poll_state(room=room, poll_id=poll_id):
         return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
     if not set_room_state(room=room, state=RoomState.POLL_CLOSES):
         return jsonify({'success': False, 'message': 'Cannot set room state.'})
@@ -229,7 +251,7 @@ Stop accepting poll responses and reveal answer
 @app.route('/<room>/admin/reveal/<poll_id>', methods=['GET'])
 def poll_result(room, poll_id):
     # Set current state
-    if not set_current_poll_state(room=room, poll_id=poll_id, poll_token=random.randint(100000, 999999)):
+    if not set_current_poll_state(room=room, poll_id=poll_id):
         return jsonify({'success': False, 'message': 'Poll_id may be incorrect.'})
     if not set_room_state(room=room, state=RoomState.POLL_ANSWER):
         return jsonify({'success': False, 'message': 'Cannot set room state.'})
