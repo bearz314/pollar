@@ -142,8 +142,9 @@ def handle_vote(data):
     session['votes'][poll_id]['token'] = poll_token
     session.modified = True  # Mutable datatype not automatically detected
 
-    # Broadcast to all
-    socketio.emit('update', state_to_json(room=room), room=room)
+    emit_targeted('myvote', clientvote_to_json(room=room))      # Votes placed by client (emit first)
+    # Broadcast to all (lightweight status update)
+    socketio.emit('vote_update', vote_state_to_json(room=room), room=room)
 
 
 
@@ -291,8 +292,10 @@ def state_to_json(room) -> dict:
                 'state': room_state.name,
                 'poll_token': get_current_poll_token(room=room),
                 'question': poll.get('question'),
+                'figure_mime': poll.get('figure_mime'),
+                'figure_base64': poll.get('figure_base64'),
                 'options': poll.get('options'),
-                'response_editable': poll.get('response_editable'),
+                'response_currently_editable': poll.get('response_editable')==True and room_state == RoomState.POLL_OPENS,
                 'anonymised_votes': anonymised_votes
             }
         case RoomState.POLL_ANSWER:
@@ -303,12 +306,33 @@ def state_to_json(room) -> dict:
             return {
                 'state': room_state.name,
                 'question': poll.get('question'),
+                'figure_mime': poll.get('figure_mime'),
+                'figure_base64': poll.get('figure'),
                 'options': poll.get('options'),
                 'correct_answer': poll.get('correct_answer'),
                 'anonymised_votes': anonymised_votes,
                 'anonymised_options_idx': anonymised_options_idx
             }
 
+'''
+Convert current vote state to json to be broadcasted to clients
+'''
+def vote_state_to_json(room) -> dict:
+    room_state = get_room_state(room=room)
+    if not room_state == RoomState.POLL_OPENS:
+        return {
+            'poll_token': 0,
+            'response_currently_editable': False,
+            'anonymised_votes': []
+        }
+    
+    poll = get_current_poll(room=room)
+    _,anonymised_votes = anonymise_optionsVotes(room=room)
+    return {
+        'poll_token': get_current_poll_token(room=room),
+        'response_currently_editable': poll.get('response_editable')==True and room_state == RoomState.POLL_OPENS,
+        'anonymised_votes': anonymised_votes
+    }
 
 '''
 Anonymise the poll votes using a seed based on the poll_id.
@@ -339,7 +363,7 @@ def anonymise_optionsVotes(room) -> Tuple[list,list]:
 
 
 '''
-Convert client vote to json to send back to the client
+Convert client vote to json to send back to the client (targeted)
 '''
 def clientvote_to_json(room) -> dict:
     poll_id = get_current_poll_id(room=room)

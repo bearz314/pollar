@@ -20,7 +20,7 @@
     <style>
         #chart {
             margin: 0px;
-            height: 60vh;
+            height: 40vh;
             /* responsive */
             width: 100%;
             overflow: hidden;
@@ -57,14 +57,16 @@
     <main>
         <div id="hero" class="px-4 py-5 my-5 text-center">
             <h1 id="hero-emoji" class="display-1 d-block mx-auto mb-4">👀</h1>
-            <h1 id="hero-title" class="display-5 fw-bold text-body-emphasis mb-4">JavaScript not enabled</h1>
+            <h1 id="hero-title" class="display-5 fw-bold text-body-emphasis mb-4"><noscript>JavaScript not enabled</noscript></h1>
             <div class="col-lg-6 mx-auto">
-                <p id="hero-subtext" class="lead mb-4">Pollar will only function as intended with JavaScript.</p>
+                <p id="hero-subtext" class="lead mb-4"><noscript>Pollar will only function as intended with JavaScript.</noscript></p>
             </div>
         </div>
 
-        <div id="poll">
-            <h1 id="question" class="mx-5"></h1>
+        <div id="mainapp">
+            <h2 id="question" class="mx-5"></h2>
+            <img id="base64Image" src="" alt="" class="img-fluid" style="max-height: 50vh;">
+            <div id="chart"></div>
             <form>
                 <div id="listGroup" class="list-group list-group-horizontal-xxl m-5">
                     <!-- Radio buttons will be dynamically inserted here -->
@@ -81,25 +83,19 @@
                         <span style="font-weight: bold;margin-left: 0.5rem;">Submit</span>
                     </button>
                 </div>
-                <div class="d-grid m-5">
-                    <button id="edit_response" type="button" onclick="voted_state=false;socket.emit('getstate');"
-                        class="btn btn-primary btn-lg btn-block justify-content-center p-3">
-                        🖊️
-                        <span style="font-weight: bold;margin-left: 0.5rem;">Edit</span>
-                    </button>
-                </div>
-                
             </form>
-
-            <div id="chart"></div>
-            <div id="results" class="m-5" style="display:none;">
-                <h2>Results</h2>
-                <div id="resultText"></div>
-
+            <div class="d-grid m-5">
+                <button id="edit_response" type="button" onclick="voted_state=false;socket.emit('getstate');"
+                    class="btn btn-primary btn-lg btn-block justify-content-center p-3">
+                    🖊️
+                    <span style="font-weight: bold;margin-left: 0.5rem;">Edit</span>
+                </button>
             </div>
+
+
             <div id="final_results" class="m-5" style="display:none;">
                 <h2>Answers</h2>
-                <div id="poll-container"></div>
+                <div id="answer-container"></div>
             </div>
         </div>
     </main>
@@ -117,30 +113,29 @@
             document.getElementById('hero-title').innerText = 'Class is not running';
             document.getElementById('hero-subtext').innerText = "It's a great time to catch up on some snooze...";
             document.getElementById('hero').style.display = 'block';
-            document.getElementById('poll').style.display = 'none';
+            document.getElementById('mainapp').style.display = 'none';
         }
         function show_startingsoon() {
             document.getElementById('hero-emoji').innerText = '🫨';
             document.getElementById('hero-title').innerText = 'Class is starting soon';
             document.getElementById('hero-subtext').innerText = 'Brace yourself, knowledge is coming!';
             document.getElementById('hero').style.display = 'block';
-            document.getElementById('poll').style.display = 'none';
+            document.getElementById('mainapp').style.display = 'none';
         }
-        function show_poll() {
+        function show_mainapp() {
             document.getElementById('hero').style.display = 'none';
-            document.getElementById('poll').style.display = 'block';
-            document.getElementById('chart').style.display = 'none';
-            document.getElementById('submit_response').style.display = 'block';
-            document.getElementById('edit_response').style.display = 'none';
-            document.getElementById('chart').style.display = 'none';
+            document.getElementById('mainapp').style.display = 'block';
         }
-        function UI_clear() {
+        function mainapp_UI_clear() {
+            // clear and hide everything
             document.getElementById('question').textContent = '';
-            document.getElementById('results').style.display = 'none';
-            document.getElementById('final_results').style.display = 'none';
+            document.getElementById('base64Image').src = '';
             document.getElementById('submit_response').style.display = 'none';
             document.getElementById('edit_response').style.display = 'none';
             document.getElementById('chart').style.display = 'none';
+            document.getElementById('final_results').style.display = 'none';
+            document.getElementById('answer-container').innerHTML = '';
+            document.getElementById('listGroup').style.display = 'none';
             // options: remove older ones - backwards to reduce node removal complexities
             let radios = document.querySelectorAll('input[type="radio"][name="listGroupRadios"]');
             for (let i = radios.length - 1; i >= 0; i--) {
@@ -149,26 +144,94 @@
                 elementToRemove.parentNode.removeChild(elementToRemove);
             }
         }
-        function UI_show_votes(data) {
-            UI_clear();
-            document.getElementById('resultText').innerHTML = data.anonymised_votes;
-            document.getElementById('results').style.display = 'block';
-            document.getElementById('submit_response').style.display = 'none';
-            document.getElementById('edit_response').style.display = 'none';
-            document.getElementById('chart').style.display = 'block';
-            if (data.response_editable && data.state == 'POLL_OPENS') {
+        function mainapp_UI_showPoll(update_event_data) {
+            mainapp_UI_clear()
+            // question and figure
+            document.getElementById('question').textContent = update_event_data.question;
+            document.getElementById('base64Image').src = 'data:'+update_event_data.figure_mime+';base64,'+update_event_data.figure_base64;
+
+            // options: generate radio buttons
+            const listGroup = document.getElementById('listGroup');
+            update_event_data.options.forEach((option, index) => {
+                // Create the label that will contain the radio input and the text
+                const label = document.createElement('label');
+                label.className = 'list-group-item d-flex gap-3 p-3';
+
+                // Create the radio input
+                const input = document.createElement('input');
+                input.className = 'form-check-input flex-shrink-0';
+                input.type = 'radio';
+                input.name = 'listGroupRadios';
+                input.value = option;
+                // Check the first radio button
+                if (index === 0) {
+                    input.checked = true;
+                }
+                input.setAttribute('data-index', index);
+                input.setAttribute('data-pollToken', update_event_data.poll_token);
+
+                // Create the span that will contain the option text
+                const span = document.createElement('span');
+                span.textContent = option;
+
+                // Append the radio input and the text span to the label
+                label.appendChild(input);
+                label.appendChild(span);
+
+                // Insert the label before the submit button
+                listGroup.insertBefore(label, listGroup.children[listGroup.children.length - 1]);
+            });
+            listGroup.style.display = 'flex';
+            document.getElementById('submit_response').style.display = 'block';
+        }
+        function mainapp_UI_showVotes(data) {
+            mainapp_UI_clear()
+            if (data.response_currently_editable) {
                 document.getElementById('edit_response').style.display = 'block';
             }
+            document.getElementById('chart').style.display = 'block';
             updateChart(data.anonymised_votes);
         }
+        function mainapp_UI_showAnswer(update_event_data) {
+            mainapp_UI_clear()
+            
+            // question and figure
+            document.getElementById('question').textContent = update_event_data.question;
+            document.getElementById('base64Image').src = 'data:'+update_event_data.figure_mime+';base64,'+update_event_data.figure_base64;
 
-        socket.on('connect', function () {
+            var answerContainer = document.getElementById('answer-container');
+
+            // Iterate through the anonymised options index to create sorted list
+            data.anonymised_options_idx.forEach(function(index, position) {
+                // Create an element for the option
+                var optionElement = document.createElement('div');
+
+                // Add the option text
+                optionElement.textContent = data.options[index];
+
+                // Check if this is the correct answer
+                if (index === data.correct_answer) {
+                    optionElement.textContent += " (correct)";
+                    optionElement.style.fontWeight = 'bold';  // Optionally style the correct answer
+                }
+
+                // Append the option element to the container
+                answerContainer.appendChild(optionElement);
+            });
+
+
+            document.getElementById('chart').style.display = 'block';
+            document.getElementById('final_results').style.display = 'block';
+            document.getElementById('answer-container').style.display = 'block';
+        }
+
+        socket.on('connect', function ()
+        {
             // on connect, expected events 'myvote' followed by 'update'. The below will run only after.
             console.log('Websocket now on standby');
         });
 
         socket.on('disconnect', function () {
-            UI_clear();
             show_offline();
             console.log('Disconnected');
         });
@@ -187,6 +250,14 @@
             }
         });
 
+        socket.on('vote_update', function (data) {
+            console.log('vote_update received');
+            if (voted_state && voted_poll_token_state==data.poll_token) {
+                show_mainapp()
+                mainapp_UI_showVotes(data);
+            }
+        });
+
         socket.on('update', function (data) {
 
             console.log('Update:');
@@ -202,88 +273,28 @@
                     show_startingsoon();
                     break;
                 case 'POLL_OPENS':
-                    show_poll();
+                    show_mainapp();
                     if (voted_poll_token_state !== data.poll_token) {
                         voted_state = false;
                     }
                     if (voted_state) {
                         // Show question/votes
                         console.log("Poll already voted.")
-                        UI_show_votes(data);
+                        mainapp_UI_showVotes(data);
                     } else {
                         // Show question/options
-                        document.getElementById('question').textContent = data.question;
-                        // options: generate radio buttons
-                        const listGroup = document.getElementById('listGroup');
-                        data.options.forEach((option, index) => {
-                            // Create the label that will contain the radio input and the text
-                            const label = document.createElement('label');
-                            label.className = 'list-group-item d-flex gap-3 p-3';
-
-                            // Create the radio input
-                            const input = document.createElement('input');
-                            input.className = 'form-check-input flex-shrink-0';
-                            input.type = 'radio';
-                            input.name = 'listGroupRadios';
-                            input.value = option;
-                            // Check the first radio button
-                            if (index === 0) {
-                                input.checked = true;
-                            }
-                            input.setAttribute('data-index', index);
-                            input.setAttribute('data-pollToken', data.poll_token);
-
-                            // Create the span that will contain the option text
-                            const span = document.createElement('span');
-                            span.textContent = option;
-
-                            // Append the radio input and the text span to the label
-                            label.appendChild(input);
-                            label.appendChild(span);
-
-                            // Insert the label before the submit button
-                            listGroup.insertBefore(label, listGroup.children[listGroup.children.length - 1]);
-                        });
-                        
-                        document.getElementById('results').style.display = 'none';
-                        document.getElementById('final_results').style.display = 'none';
+                        mainapp_UI_showPoll(data);
                     }
                     break;
                 case 'POLL_CLOSES':
                     // Show question/votes
-                    show_poll();
-                    UI_show_votes(data);
+                    show_mainapp();
+                    mainapp_UI_showVotes(data);
                     break;
                 case 'POLL_ANSWER':
                     // Show question/options+votes/answer
-                    show_poll();
-                    UI_show_votes(data);
-                    document.getElementById('question').textContent = data.question;
-
-                    var pollContainer = document.getElementById('poll-container');
-                    pollContainer.innerHTML = '';
-
-                    // Iterate through the anonymised options index to create sorted list
-                    data.anonymised_options_idx.forEach(function(index, position) {
-                        // Create an element for the option
-                        var optionElement = document.createElement('div');
-
-                        // Add the option text
-                        optionElement.textContent = data.options[index];
-
-                        // Check if this is the correct answer
-                        if (index === data.correct_answer) {
-                            optionElement.textContent += " (correct)";
-                            optionElement.style.fontWeight = 'bold';  // Optionally style the correct answer
-                        }
-
-                        // Append the option element to the container
-                        pollContainer.appendChild(optionElement);
-                    });
-
-
-                    document.getElementById('final_results').style.display = 'block';
-                    document.getElementById('results').style.display = 'none';
+                    show_mainapp();
+                    mainapp_UI_showAnswer(data);
                     break;
             }
         });
@@ -295,10 +306,9 @@
                     let optionIndex = parseInt(radio.getAttribute('data-index'));
                     let pollToken = parseInt(radio.getAttribute('data-pollToken'));
 
-                    voted_state = true;
-                    voted_poll_token_state = pollToken;
                     socket.emit('vote', { poll_token: pollToken, option_index: optionIndex });
-                    // expects 'update' event
+                    // expects 'myvote' event to check if vote registered correctly
+                    // followed by 'vote_update' event and the result will be shown
                     console.log(`Voted ${optionIndex} with token ${pollToken}!`);
                     return;
                 }
