@@ -103,7 +103,7 @@
 
 
     <script>
-        const socket = io('http://127.0.0.1:5000');
+        const socket = io('https://pollar.minified.zip');
 
         let voted_state = false;
         let voted_poll_token_state = "";
@@ -201,28 +201,42 @@
 
             var answerContainer = document.getElementById('answer-container');
 
-            // Iterate through the anonymised options index to create sorted list
-            data.anonymised_options_idx.forEach(function(index, position) {
-                // Create an element for the option
-                var optionElement = document.createElement('div');
 
-                // Add the option text
-                optionElement.textContent = data.options[index];
+            // Create an array of objects that include votes and corresponding keys, while
+            // mapping keys directly to options based on index positions
+            const combined = update_event_data.anonymised_votes.map((anonymised_vote, index) => ({
+                anonymised_vote,
+                anonymised_options_idx: update_event_data.anonymised_options_idx[index],
+                option: update_event_data.options[update_event_data.anonymised_options_idx[index]]  // Map the key to the option by indexing
+            }));
 
-                // Check if this is the correct answer
-                if (index === data.correct_answer) {
-                    optionElement.textContent += " (correct)";
-                    optionElement.style.fontWeight = 'bold';  // Optionally style the correct answer
+            // Sort the combined array by votes in descending order
+            combined.sort((a, b) => b.anonymised_vote - a.anonymised_vote);
+
+            // Map the sorted array to the options and check for the correct answer
+            const sortedOptions = combined.map(item => {
+                if (item.anonymised_options_idx === update_event_data.correct_answer) {
+                    return item.option + " (correct)"; // Append "(correct)" if this is the correct answer
+                } else {
+                    return item.option;
                 }
+            });
 
-                // Append the option element to the container
-                answerContainer.appendChild(optionElement);
+            sortedOptions.forEach(option => {
+                // Create a new div element
+                const div = document.createElement('div');
+                div.textContent = option;  // Set the text of the div to the option
+                div.style.fontWeight = 'bold';
+                // Append the new div to the container
+                answerContainer.appendChild(div);
             });
 
 
             document.getElementById('chart').style.display = 'block';
             document.getElementById('final_results').style.display = 'block';
             document.getElementById('answer-container').style.display = 'block';
+
+            updateChart(update_event_data.anonymised_votes);
         }
 
         socket.on('connect', function ()

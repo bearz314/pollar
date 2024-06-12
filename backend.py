@@ -6,7 +6,6 @@ from flask_cors import CORS
 from typing import Tuple
 
 import random
-import uuid
 
 from redis_interface import *
 from roomstate import RoomState
@@ -387,4 +386,4 @@ def clientvote_to_json(room) -> dict:
 
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    socketio.run(app)
