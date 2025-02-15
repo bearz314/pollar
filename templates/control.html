@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pollar Panel</title>
+    <!--Socket IO-->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"
+        integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO"
+        crossorigin="anonymous"></script>
+    <!--CSS Bootstrap-->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <!--D3 Graphing-->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"
+        integrity="sha512-vc58qvvBdrDR4etbxMdlTt4GBQk1qjvyORR2nrsPsFPyrs+/u5c3+1Ct6upOgdZoIl7eq6k3a1UPDSNAQi/32A=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    
+    <style>
+        body {
+            min-height: 100vh;
+            min-height: -webkit-fill-available;
+        }
+
+        html {
+            height: -webkit-fill-available;
+            font-size: small !important;
+        }
+
+        main {
+            height: 100vh;
+            height: -webkit-fill-available;
+            max-height: 100vh;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+
+        #chart {
+            margin: 0px;
+            height: 100%;
+            /* responsive */
+            width: 100%;
+            overflow: hidden;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .bar {
+            fill: gray;
+            margin: 2px;
+        }
+    </style>
+</head>
+
+
+
+
+<body>
+    <main class="d-flex flex-nowrap">
+
+    <div class="d-flex flex-column flex-shrink-0 p-3 bg-body-tertiary" style="width: 20vw;">
+        <a href="/" class="d-flex align-items-center mb-3 mb-md-0 me-md-auto link-body-emphasis text-decoration-none">
+          <span class="fs-2">
+            Join:
+            <img style="width: 100%; max-width: 200px;" src="data:image/png;base64,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">
+          </span>
+        </a>
+        <hr>
+
+        <div class="nav flex-column mb-auto">
+            Room
+            <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/new" target="apiFrame"  class="btn btn-outline-danger fs-6">Reset</a>
+                    <a href="https://pollar.minified.zip/live/admin/close" target="apiFrame"  class="btn btn-outline-danger fs-6">Close</a>
+                </div>
+            </div>
+        </div>
+
+        
+
+        <div class="nav flex-column mb-auto">
+            Q1
+            <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/open/q1" target="apiFrame"  class="btn btn-outline-primary fs-6">Open</a>
+                    <a href="https://pollar.minified.zip/live/admin/close/q1" target="apiFrame"  class="btn btn-outline-primary fs-6">Close</a>
+                    <a href="https://pollar.minified.zip/live/admin/reveal/q1" target="apiFrame"  class="btn btn-outline-primary fs-6">Reveal</a>
+                </div>
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/reset/q1" target="apiFrame"  class="btn btn-outline-danger fs-6">X</a>
+                </div>
+            </div>
+
+            Q2
+            <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/open/q2" target="apiFrame"  class="btn btn-outline-primary fs-6">Open</a>
+                    <a href="https://pollar.minified.zip/live/admin/close/q2" target="apiFrame"  class="btn btn-outline-primary fs-6">Close</a>
+                    <a href="https://pollar.minified.zip/live/admin/reveal/q2" target="apiFrame"  class="btn btn-outline-primary fs-6">Reveal</a>
+                </div>
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/reset/q2" target="apiFrame"  class="btn btn-outline-danger fs-6">X</a>
+                </div>
+            </div>
+
+            Q3
+            <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/open/q3" target="apiFrame"  class="btn btn-outline-primary fs-6">Open</a>
+                    <a href="https://pollar.minified.zip/live/admin/close/q3" target="apiFrame"  class="btn btn-outline-primary fs-6">Close</a>
+                    <a href="https://pollar.minified.zip/live/admin/reveal/q3" target="apiFrame"  class="btn btn-outline-primary fs-6">Reveal</a>
+                </div>
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/reset/q3" target="apiFrame"  class="btn btn-outline-danger fs-6">X</a>
+                </div>
+            </div>
+
+            Q4
+            <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/open/q4" target="apiFrame"  class="btn btn-outline-primary fs-6">Open</a>
+                    <a href="https://pollar.minified.zip/live/admin/close/q4" target="apiFrame"  class="btn btn-outline-primary fs-6">Close</a>
+                    <a href="https://pollar.minified.zip/live/admin/reveal/q4" target="apiFrame"  class="btn btn-outline-primary fs-6">Reveal</a>
+                </div>
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/reset/q4" target="apiFrame"  class="btn btn-outline-danger fs-6">X</a>
+                </div>
+            </div>
+
+            Q5
+            <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/open/q5" target="apiFrame"  class="btn btn-outline-primary fs-6">Open</a>
+                    <a href="https://pollar.minified.zip/live/admin/close/q5" target="apiFrame"  class="btn btn-outline-primary fs-6">Close</a>
+                    <a href="https://pollar.minified.zip/live/admin/reveal/q5" target="apiFrame"  class="btn btn-outline-primary fs-6">Reveal</a>
+                </div>
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/reset/q5" target="apiFrame"  class="btn btn-outline-danger fs-6">X</a>
+                </div>
+            </div>
+
+            Q6
+            <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/open/q6" target="apiFrame"  class="btn btn-outline-primary fs-6">Open</a>
+                    <a href="https://pollar.minified.zip/live/admin/close/q6" target="apiFrame"  class="btn btn-outline-primary fs-6">Close</a>
+                    <a href="https://pollar.minified.zip/live/admin/reveal/q6" target="apiFrame"  class="btn btn-outline-primary fs-6">Reveal</a>
+                </div>
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/reset/q6" target="apiFrame"  class="btn btn-outline-danger fs-6">X</a>
+                </div>
+            </div>
+
+            Q7
+            <div class="btn-toolbar" role="toolbar" aria-label="Toolbar with button groups">
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/open/q7" target="apiFrame"  class="btn btn-outline-primary fs-6">Open</a>
+                    <a href="https://pollar.minified.zip/live/admin/close/q7" target="apiFrame"  class="btn btn-outline-primary fs-6">Close</a>
+                    <a href="https://pollar.minified.zip/live/admin/reveal/q7" target="apiFrame"  class="btn btn-outline-primary fs-6">Reveal</a>
+                </div>
+                <div class="btn-group">
+                    <a href="https://pollar.minified.zip/live/admin/reset/q7" target="apiFrame"  class="btn btn-outline-danger fs-6">X</a>
+                </div>
+            </div>
+        </div>
+
+        <iframe name="apiFrame" style="height: 10vh;"></iframe>
+
+    </div> <!-- end nav side bar -->
+
+    <!-- Start main content -->
+
+    <div class="d-flex flex-column flex-shrink-0" style="width: 80vw; background-color: black;">
+        <div class="d-flex flex-row flex-shrink-0" style="height: 70vh; background-color: red;">
+            <iframe src="https://pollar.minified.zip/live" style="width: 100%; height: 100%;"></iframe>
+        </div>
+        <div class="d-flex flex-row flex-shrink-0" style="height: 30vh; background-color: white;">
+            <div id="chart"></div>
+        </div>
+    </div>
+
+</main>
+
+
+</body>
+<script>
+    const socket = io('https://pollar.minified.zip');
+    socket.on('connect', function () {
+        // on connect, expected events 'myvote' followed by 'update'. The below will run only after.
+        console.log('Websocket now on standby');
+    });
+
+    socket.on('disconnect', function () {
+        console.log('Disconnected');
+    });
+
+    socket.on('vote_update', function (data) {
+        console.log('vote_update received');
+        updateChart(data.anonymised_votes);
+    });
+
+
+    // Chart stuff below
+
+
+    // Function to get the dynamic width and height
+    function getChartDimensions() {
+        const chartDiv = document.getElementById('chart');
+        return {
+            width: chartDiv.clientWidth,
+            height: chartDiv.clientHeight
+        };
+    }
+
+    // Create the SVG element with dynamic viewBox
+    const chartMargin = { top: 20, right: 30, bottom: 10, left: 30 };
+    let svg = d3.select("#chart").append("svg");
+    let chartGroup = svg.append("g")
+        .attr("transform", `translate(${chartMargin.left},${chartMargin.top})`);
+
+    // Function to update the bar chart with new data
+    function updateChart(values) {
+        // constants
+        const transitionDuration = 750;
+        const textPadding = 5;
+        const labelYOffset = 4;
+
+        // Graphable area is graph width minus text width
+        const chartDimensions = getChartDimensions();
+
+        // Find out the length of the longest text
+        let tempTextGroup = svg.append("g").attr("opacity", 0);
+        // append temporary text to measure
+        let tempTexts = tempTextGroup.selectAll(".temp-text")
+            .data(values)
+            .enter().append("text")
+            .attr("class", "temp-text")
+            .attr("x", 0)
+            .text(d => d);
+        // measure text widths and find the maximum width
+        let maxTextWidth = d3.max(tempTexts.nodes(), node => node.getComputedTextLength());
+        tempTextGroup.remove();
+
+        // Graphable area for bars (excluding texts)
+        const width = chartDimensions.width - chartMargin.left - chartMargin.right - maxTextWidth;
+        const height = chartDimensions.height - chartMargin.top - chartMargin.bottom;
+
+        // Update viewBox to new dimensions for responsiveness
+        svg.attr("viewBox", `0 0 ${chartDimensions.width} ${chartDimensions.height}`);
+
+        let data = values.map((value, index) => ({ name: index, value }));
+
+        // Sort data according to value
+        data.sort((a, b) => d3.descending(a.value, b.value));
+
+        // Update the scales
+        const x = d3.scaleLinear()
+            .domain([0, d3.max(data, d => d.value)])
+            .range([0, width]);
+
+        const y = d3.scaleBand()
+            .domain(data.map(d => d.name))
+            .range([0, height])
+            .padding(0.1);
+
+        // Join the data to rects (bars)
+        const bars = chartGroup.selectAll(".bar")
+            .data(data, d => d.name);
+
+        bars.enter()
+            .append("rect")
+            .attr("class", "bar")
+            .attr("x", 0)
+            .attr("y", d => y(d.name))
+            .attr("height", y.bandwidth())
+            .merge(bars)
+            // animation for all change in state
+            .transition().duration(transitionDuration)
+            .attr("x", 0)
+            .attr("y", d => y(d.name))
+            .attr("width", d => x(d.value));
+
+        bars.exit()
+            .transition().duration(transitionDuration)
+            .attr("width", 0)
+            .remove();
+
+        // Join the data to text labels
+        const labels = chartGroup.selectAll(".label")
+            .data(data, d => d.name);
+
+        labels.enter()
+            .append("text")
+            .attr("class", "label")
+            .attr("x", d => x(d.value) + 5)
+            .attr("y", d => y(d.name) + y.bandwidth() / 2 + labelYOffset)
+            .text(d => d.value)
+            .attr("text-anchor", "start")
+            .merge(labels)
+            // animation for all change in state
+            .transition().duration(750)
+            .attr("x", d => x(d.value) + 5)
+            .attr("y", d => y(d.name) + y.bandwidth() / 2 + labelYOffset)
+            .text(d => d.value);
+
+        labels.exit()
+            .transition().duration(750)
+            .attr("x", 0)
+            .remove();
+    }
+</script>
+
+
+<!--CSS Bootstrap-->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+crossorigin="anonymous"></script>
+
+</html>

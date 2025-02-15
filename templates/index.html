@@ -239,8 +239,7 @@
             updateChart(update_event_data.anonymised_votes);
         }
 
-        socket.on('connect', function ()
-        {
+        socket.on('connect', function () {
             // on connect, expected events 'myvote' followed by 'update'. The below will run only after.
             console.log('Websocket now on standby');
         });
